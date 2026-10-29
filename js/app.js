@@ -540,7 +540,7 @@
     const nv = nivelDe(cur).nivel;
     const N = nv ? analisisNivel(ens, cur) : null;
     const HN = N && N.porCurso.length >= 2 ? Estad.historialNivel(ensayos(), paralelosDe(cur), (e, c) => hojasDe(e, c), Estad.grupoEnsayo(ens), nv) : null;
-    return { ens, cur, A, H, AL: Estad.alertas(A, H), G: Estad.grupos(A, E.grupoPor || 'eje'), N, HN, nivel: nombreNivel(cur) };
+    return { ens, cur, A, H, AL: Estad.alertas(A, H), G: Estad.grupos(A, E.grupoPor || 'eje'), N, HN, nivel: nombreNivel(cur), colegio: config().colegio || {} };
   }
   async function descargarInforme(tipo, ids) {
     toast('Preparando el informe…');
@@ -548,8 +548,8 @@
       const ctx = contextoInforme();
       const base = `${Almacen.id(ctx.cur.nombre)}_${Almacen.id(ctx.ens.nombre).slice(0, 30)}`;
       const blob = tipo === 'curso' ? Informe.curso(ctx) : Informe.estudiantes(ctx, ids);
-      const nombre = tipo === 'curso' ? `informe_${base}.pdf`
-        : ids && ids.length === 1 ? `informe_${Almacen.id(ctx.A.estudiantes.find((x) => x.e.id === ids[0]).e.nombre)}_${base}.pdf` : `informes_estudiantes_${base}.pdf`;
+      const nombre = tipo === 'curso' ? `informe_docente_${base}.pdf`
+        : ids && ids.length === 1 ? `ficha_${Almacen.id(ctx.A.estudiantes.find((x) => x.e.id === ids[0]).e.nombre)}_${base}.pdf` : `fichas_estudiantes_${base}.pdf`;
       await descargar(nombre, blob);
     } catch (e) { console.error(e); toast('No se pudo crear el informe: ' + e.message); }
   }
@@ -580,8 +580,8 @@
     let cuerpo = '';
     const sinHojas = A.hechas.length ? '' : 'disabled';
     let exportar = `<div class="acciones-exportar"><button class="btn" data-accion="excel" ${sinHojas}>${ICONO.bajar} Exportar el curso a Excel</button>
-      <button class="btn" data-accion="informe-curso" ${sinHojas}>${ICONO.bajar} Informe PDF completo (curso y estudiantes)</button>${tab === 'estudiantes' ? `
-      <button class="btn" data-accion="informe-estudiantes" ${sinHojas}>${ICONO.bajar} Informes PDF por estudiante</button>` : ''}</div>`;
+      <button class="btn" data-accion="informe-curso" ${sinHojas}>${ICONO.bajar} Informe PDF para docentes (curso y estudiantes)</button>${tab === 'estudiantes' ? `
+      <button class="btn" data-accion="informe-estudiantes" ${sinHojas}>${ICONO.bajar} Fichas PDF para estudiantes y apoderados</button>` : ''}</div>`;
     if (!A.hechas.length && tab !== 'historial' && tab !== 'nivel') {
       cuerpo = '<div class="tarjeta vacio">Cuando corrijas las primeras hojas de este ensayo verás aquí los gráficos.</div>';
     } else if (tab === 'curso') {
@@ -805,7 +805,7 @@
           ${falladas.map((p) => `<tr><td class="num">${p.n}${p.piloto ? '<small> (piloto)</small>' : ''}</td><td>${P.r[p.i] || '–'}</td><td>${p.clave}</td><td class="ajusta">${h(p.eje)}</td><td class="num">${pct(p.acierto)}</td></tr>`).join('')}</tbody></table></div>
         </section>
         <button class="btn" data-accion="ver-hoja" data-a="${h(P.e.id)}">Ver o corregir su hoja</button>
-        <button class="btn" data-accion="informe-estudiante">${ICONO.bajar} Informe PDF de este estudiante</button>
+        <button class="btn" data-accion="informe-estudiante">${ICONO.bajar} Ficha PDF para el estudiante y su apoderado</button>
       </div></div>`;
   }
 
@@ -860,9 +860,43 @@
       <button class="btn" data-accion="ir" data-a="curso">Ir a Resultados</button></div></div>${nav('')}</div>`;
   }
 
+  // Datos del colegio para los informes: nombre, responsable, logo y metas
+  function seccionColegio() {
+    const c = config().colegio || {};
+    return `<section class="tarjeta pad"><span class="etiqueta">Colegio e informes</span>
+      <label class="campo" for="a-colegio">Nombre del colegio<input id="a-colegio" value="${h(c.nombre || '')}" placeholder="Ej.: Liceo Bicentenario de Temuco"></label>
+      <label class="campo" for="a-responsable">Responsable de los informes<input id="a-responsable" value="${h(c.responsable || '')}" placeholder="Ej.: Marcelo Aravena, UTP"></label>
+      <div class="dos">
+        <label class="campo" for="a-meta-logro">Meta de logro (%)<input id="a-meta-logro" inputmode="decimal" value="${c.metaLogro != null ? Math.round(c.metaLogro * 100) : ''}" placeholder="Ej.: 60"></label>
+        <label class="campo" for="a-meta-puntaje">Meta de puntaje PAES<input id="a-meta-puntaje" inputmode="numeric" value="${c.metaPuntaje != null ? c.metaPuntaje : ''}" placeholder="Ej.: 600"></label>
+      </div>
+      <div class="logo-fila">${c.logo ? `<img src="${c.logo.src}" alt="Logo del colegio">` : '<span class="nota">Sin logo</span>'}
+        <label class="btn" for="a-logo">${ICONO.subir} ${c.logo ? 'Cambiar logo' : 'Subir logo'}</label>${c.logo ? '<button class="btn" data-accion="quitar-logo">Quitar</button>' : ''}</div>
+      <input type="file" id="a-logo" accept="image/png,image/jpeg" class="oculto-visual" data-archivo="logo">
+      <span class="nota">Aparecen en la portada y el pie de los informes PDF. Las metas se comparan con el resultado de cada curso.</span>
+      <button class="btn" data-accion="guardar-colegio">Guardar</button>
+    </section>`;
+  }
+  // Achica el logo para que no pese en el almacenamiento ni en los PDF
+  function leerLogo(archivo) {
+    return new Promise((ok, mal) => {
+      const img = new Image();
+      img.onload = () => {
+        const k = Math.min(1, 240 / Math.max(img.width, img.height));
+        const cv = document.createElement('canvas'); cv.width = Math.round(img.width * k); cv.height = Math.round(img.height * k);
+        const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height); cx.drawImage(img, 0, 0, cv.width, cv.height);
+        URL.revokeObjectURL(img.src);
+        ok({ src: cv.toDataURL('image/jpeg', 0.9), w: cv.width, h: cv.height });
+      };
+      img.onerror = () => mal(new Error('No se pudo leer la imagen'));
+      img.src = URL.createObjectURL(archivo);
+    });
+  }
+
   function pAjustes() {
     return `<div class="pantalla">${cabecera('Ajustes y respaldo', Almacen.modo === 'nube' ? 'Tus datos se guardan en tu cuenta de Claude' : 'Tus datos se guardan en este navegador')}
       <div class="cuerpo">
+        ${seccionColegio()}
         <section class="tarjeta pad"><span class="etiqueta">Respaldo</span>
           <span style="font-size:14px;color:var(--texto-2)">Descarga todos tus ensayos, cursos y resultados en un archivo. Sirve para cambiar de equipo o recuperar datos.</span>
           <div class="fila-botones"><button class="btn" data-accion="respaldo">${ICONO.bajar} Descargar</button><label class="btn" for="a-respaldo">${ICONO.subir} Restaurar</label></div>
@@ -1260,6 +1294,15 @@
       try { await Almacen.guardar('cursos', c.id, { ...c, nivel, letra }); } catch (e) { toast(e.message); return; }
       toast(nivel ? `${c.nombre}: ${nivel}${letra ? ' ' + letra : ''}` : 'Nivel borrado'); E.mantenerScroll = true; render();
     },
+    'guardar-colegio': async () => {
+      const v = (id) => document.getElementById(id).value.trim();
+      const ml = parseFloat(v('a-meta-logro').replace(',', '.')), mp = parseInt(v('a-meta-puntaje'), 10);
+      if (v('a-meta-logro') && !(ml > 0 && ml <= 100)) { toast('La meta de logro va entre 1 y 100.'); return; }
+      if (v('a-meta-puntaje') && !(mp >= 100 && mp <= 1000)) { toast('La meta de puntaje va entre 100 y 1000.'); return; }
+      await fijarConfig({ colegio: { ...(config().colegio || {}), nombre: v('a-colegio'), responsable: v('a-responsable'), metaLogro: v('a-meta-logro') ? ml / 100 : null, metaPuntaje: v('a-meta-puntaje') ? mp : null } });
+      toast('Datos del colegio guardados'); E.mantenerScroll = true; render();
+    },
+    'quitar-logo': async () => { const c = { ...(config().colegio || {}) }; delete c.logo; await fijarConfig({ colegio: c }); E.mantenerScroll = true; render(); },
     'guardar-ajustes': async () => {
       const num = (id) => parseFloat(document.getElementById(id).value.replace(',', '.'));
       const exigencia = num('a-exigencia') / 100, aprobacion = num('a-aprobacion');
@@ -1384,6 +1427,7 @@
           E.mantenerScroll = true; render();
         }
         if (el.dataset.archivo === 'curso') { await guardarCursosDesdeLista(await Excel.leerLista(archivos[0]), archivos[0].name); render(); }
+        if (el.dataset.archivo === 'logo') { const logo = await leerLogo(archivos[0]); await fijarConfig({ colegio: { ...(config().colegio || {}), logo } }); toast('Logo guardado'); E.mantenerScroll = true; render(); }
         if (el.dataset.archivo === 'respaldo') { await Almacen.restaurar(JSON.parse(await archivos[0].text())); toast('Respaldo restaurado'); render(); }
       } catch (e) { toast(e.message || 'No pude leer ese archivo.'); }
     }

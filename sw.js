@@ -1,6 +1,6 @@
 // Service worker del lector óptico: guarda la app en el celular para que funcione sin internet.
 // Generado por construir.py (la versión cambia sola cuando cambia algún archivo).
-const VERSION = 'lector-b6deac5c44';
+const VERSION = 'lector-9acaf912b9';
 const ARCHIVOS = ["./", "index.html", "manifest.webmanifest", "css/app.css", "js/diseno.js", "js/lector.js", "js/almacen.js", "js/excel.js", "js/estadisticas.js", "js/graficos.js", "js/plantilla_tex.js", "js/plantillas_xlsx.js", "js/hojas.js", "js/temarios.js", "js/informe.js", "js/ejemplo.js", "js/app.js", "lib/jsQR.js", "lib/xlsx.full.min.js", "lib/jspdf.umd.min.js", "lib/qrcode.js", "icono-192.png", "icono-512.png", "apple-touch-icon.png"];
 
 self.addEventListener('install', (ev) => {

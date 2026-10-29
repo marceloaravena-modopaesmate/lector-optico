@@ -327,6 +327,7 @@ const Estad = (() => {
       if (x.logro < u.riesgo && cambio != null && cambio < 0) lista.push({ id: 'riesgo', texto: 'Bajo logro y bajando' });
       else if (ultimos.length >= 3 && ultimos.every((v) => v < u.riesgo)) lista.push({ id: 'riesgo', texto: `Bajo ${Math.round(u.riesgo * 100)}% en los tres últimos ensayos` });
       else if (x.logro < u.riesgo) lista.push({ id: 'bajo', texto: `Bajo ${Math.round(u.riesgo * 100)}% de logro` });
+      else if (x.nota < conf.escala.aprobacion) lista.push({ id: 'bajo', texto: `Nota bajo ${notaTexto(conf.escala.aprobacion)}` });
       if (cambio != null && cambio <= -u.baja) lista.push({ id: 'baja', texto: `Bajó ${Math.round(-cambio * 100)} puntos` });
       if (x.omitidas / A.n > u.omision) lista.push({ id: 'omision', texto: `${x.omitidas} preguntas en blanco` });
       const peso = { riesgo: 3, baja: 2, bajo: 1, omision: 1 };
