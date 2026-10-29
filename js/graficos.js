@@ -284,7 +284,7 @@ const Graficos = (() => {
 
   // Histograma de notas con la línea de aprobación
   function histNotas(bins, aprobacion) {
-    const W = 340, H = 170, izq = 24, abajo = 22, arr = 22;
+    const W = 340, H = 186, izq = 24, abajo = 22, arr = 40;   // franja superior para el rótulo de aprobación
     const max = Math.max(1, ...bins.map((b) => b.n));
     const paso = Math.max(1, Math.ceil(max / 4)), tope = Math.ceil(max / paso) * paso;
     const ancho = (W - izq) / bins.length, y = (v) => arr + (H - arr - abajo) * (1 - v / tope);
@@ -301,7 +301,7 @@ const Graficos = (() => {
     const k = bins.findIndex((b) => b.desde >= aprobacion);
     if (k > 0) {
       const xa = izq + k * ancho;
-      g += `<line x1="${xa}" x2="${xa}" y1="${arr - 10}" y2="${y(0)}" class="marca-media"></line><text x="${xa + 5}" y="${arr - 8}" class="rotulo">aprobación ${nt(aprobacion)}</text>`;
+      g += `<line x1="${xa}" x2="${xa}" y1="6" y2="${y(0)}" class="marca-media"></line><text x="${xa + 5}" y="14" class="rotulo">aprobación ${nt(aprobacion)}</text>`;
     }
     return svg(W, H, g, 'Cuántos estudiantes hay en cada tramo de nota.');
   }

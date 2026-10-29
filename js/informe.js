@@ -132,7 +132,8 @@ const Informe = (() => {
 
   // Columnas con su cantidad encima; linea = índice de la columna desde donde se marca un corte
   function columnas(P, bins, { alto = 50, linea = null, lineaTexto = '' } = {}) {
-    P.cabe(alto + 14);
+    P.cabe(alto + 14 + (linea != null ? 7 : 0));
+    if (linea != null) P.y += 7;   // franja para el rótulo de la línea, sobre las cifras de las columnas
     const { doc } = P, izq = M + 8, ancho = W - 8, base = P.y + alto;
     const max = Math.max(1, ...bins.map((b) => b.n));
     const paso = ancho / bins.length, wb = Math.min(22, paso * 0.7);
@@ -146,8 +147,8 @@ const Informe = (() => {
     if (linea != null) {
       const xl = izq + paso * linea;
       doc.setDrawColor(C.texto); doc.setLineWidth(0.5); doc.setLineDashPattern([1.2, 1], 0);
-      doc.line(xl, P.y - 1, xl, base); doc.setLineDashPattern([], 0);
-      fuente(doc, 8.5, 'bold'); doc.text(lineaTexto, xl + 1.5, P.y + 2);
+      doc.line(xl, P.y - 7, xl, base); doc.setLineDashPattern([], 0);
+      fuente(doc, 8.5, 'bold'); doc.text(lineaTexto, xl + 1.5, P.y - 4);
     }
     P.y = base + 10;
   }
