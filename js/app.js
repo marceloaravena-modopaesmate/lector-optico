@@ -110,10 +110,10 @@
       id: 'PAES-M1-2026-01', nombre: 'Ensayo PAES M1 N°1 (ejemplo)', tipo: 'PAES',
       asignatura: 'PAES Competencia Matemática (M1)', nivel: 'IV medio', fecha: '10-11-2026', alternativas: 4,
       creado: new Date().toISOString(), ejemplo: true,
-      // Tabla de puntaje ilustrativa (no es la oficial de DEMRE): 100 puntos con 0 correctas y 1000 con 65
-      tablaPaes: Array.from({ length: 66 }, (_, c) => Math.round(100 + 900 * Math.pow(c / 65, 0.85))),
+      tablaPaes: Estad.TABLAS_PAES.m1.puntajes.slice(),
       preguntas: Array.from({ length: 65 }, (_, i) => ({
         n: i + 1, clave: 'ABCD'[((i + 1) * 7) % 4], eje: ejes[Math.min(Math.floor(i * 4 / 65), 3)], habilidad: habs[(i + 1) % 4], contenido: '',
+        ...((i + 1) % 13 === 0 ? { piloto: true } : {}),
       })),
     };
     const nombres = ['Camila Andrea Rojas Muñoz', 'Benjamín Soto Pérez', 'Valentina Fuentes Lagos', 'Matías Ignacio Vera Díaz'];
@@ -187,7 +187,7 @@
             const r = hojas[e.id];
             return `<button class="item" data-accion="ver-hoja" data-a="${h(e.id)}"><span class="iniciales">${h(iniciales(e.nombre))}</span>
               <span class="principal"><b>${h(e.nombre)}</b><span>${h(hace(r.fecha))} · N° ${e.lista}</span></span>
-              <span class="chip ok num">${pct(r.correctas / ens.preguntas.length)}</span></button>`;
+              <span class="chip ok num">${pct(Estad.contar(ens, r.respuestas).logro)}</span></button>`;
           }).join('')}</div></section>`;
       }
     }
@@ -255,11 +255,11 @@
   function pRevision() {
     const rev = E.revision;
     const ens = rev.ensayo;
-    const n = ens.preguntas.length;
+    const n = Estad.puntuables(ens).length;
     let correctas = 0, pendientes = 0;
     const celdas = ens.preguntas.map((p, i) => {
       const est = estadoCelda(rev, i);
-      if (est === 'ok') correctas++;
+      if (est === 'ok' && !p.piloto) correctas++;
       if (est === 'rev') pendientes++;
       const marca = est === 'rev' ? (rev.estados[i] === 'doble' ? '?' : rev.respuestas[i] + '?') : (rev.respuestas[i] || '–');
       const desc = { ok: 'correcta', mal: 'incorrecta', blanco: 'en blanco', rev: 'por revisar' }[est];
@@ -397,6 +397,9 @@
           ${e.preguntas.length > 6 ? `<span style="font-size:13px;color:var(--texto-2)">y ${e.preguntas.length - 6} preguntas más.</span>` : ''}` : ''}
           <label class="campo" for="e-clave">O escribe la clave seguida (una letra por pregunta)
             <input id="e-clave" data-campo="clave" value="${h(clave)}" placeholder="ABDCA…" autocapitalize="characters" autocomplete="off" spellcheck="false" style="font-family:ui-monospace,monospace;letter-spacing:0.08em"></label>
+          <label class="campo" for="e-pilotos">Preguntas piloto (no cuentan para el puntaje, la nota ni el logro)
+            <input id="e-pilotos" data-campo="pilotos" value="${h(e.preguntas.filter((p) => p.piloto).map((p) => p.n).join(', '))}" placeholder="Ej.: 12, 25, 38, 51, 64" inputmode="numeric"></label>
+          <span class="nota">${e.preguntas.length ? `${e.preguntas.filter((p) => p.piloto).length} piloto${e.preguntas.filter((p) => p.piloto).length === 1 ? '' : 's'} · ${Estad.puntuables(e).length} preguntas cuentan.` : ''} Se pueden marcar también en la columna "Piloto" de la plantilla Excel.</span>
         </section>
         ${seccionConversion(e)}
         <section class="tarjeta pad"><span class="etiqueta">4 · Hojas para un curso</span>
@@ -427,8 +430,18 @@
           <label class="campo" for="e-ref1">% Adecuado del colegio en el SIMCE<input id="e-ref1" data-campo="referencia.colegio" inputmode="decimal" value="${pc(ref.colegio)}"></label>
           <label class="campo" for="e-ref2">% Adecuado de colegios similares<input id="e-ref2" data-campo="referencia.similar" inputmode="decimal" value="${pc(ref.similar)}"></label>
         </div>`
-      : `<span style="font-size:14px;color:var(--texto-2)">Pega la tabla de conversión del ensayo: el puntaje para 0 correctas, 1 correcta, 2… en orden, separados por coma o uno por línea. También se carga desde la hoja "Puntajes" de la plantilla Excel.</span>
-        <label class="campo" for="e-tabla">Puntajes${e.tablaPaes && e.tablaPaes.length ? ` (${e.tablaPaes.length} valores: de 0 a ${e.tablaPaes.length - 1} correctas)` : ''}<textarea id="e-tabla" data-campo="tablaPaes" placeholder="100, 150, 187, …">${h(tabla)}</textarea></label>
+      : `${(() => {
+        const idActual = Object.keys(Estad.TABLAS_PAES).find((id) => tabla && Estad.TABLAS_PAES[id].puntajes.join(', ') === tabla) || (tabla ? 'propia' : '');
+        const sugerida = Estad.tablaParaAsignatura(e.asignatura);
+        const n = Estad.puntuables(e).length;
+        const desajuste = e.tablaPaes && e.tablaPaes.length && n && e.tablaPaes.length - 1 !== n;
+        return `<label class="campo" for="e-tabla-id">Tabla de puntajes<select id="e-tabla-id" data-campo="tablaId">
+          <option value="" ${!idActual ? 'selected' : ''}>${sugerida ? `Automática según la asignatura (${Estad.TABLAS_PAES[sugerida].nombre})` : 'Elige una tabla…'}</option>
+          ${Object.entries(Estad.TABLAS_PAES).map(([id, t]) => `<option value="${id}" ${idActual === id ? 'selected' : ''}>${t.nombre} · hasta ${t.puntajes.length - 1} correctas</option>`).join('')}
+          <option value="propia" ${idActual === 'propia' ? 'selected' : ''}>Otra tabla (la pego abajo)</option></select></label>
+        ${desajuste ? `<div class="aviso rev">${ICONO.alerta}<span>La tabla llega hasta ${e.tablaPaes.length - 1} correctas, pero en este ensayo cuentan ${n} preguntas. ${n > e.tablaPaes.length - 1 ? `Marca las ${n - (e.tablaPaes.length - 1)} preguntas piloto en la sección 2.` : 'Revisa la tabla o las preguntas piloto.'}</span></div>` : ''}
+        <label class="campo" for="e-tabla">Puntajes de otra tabla: el de 0 correctas, 1, 2… en orden, separados por coma${e.tablaPaes && e.tablaPaes.length ? ` (ahora: ${e.tablaPaes.length} valores, de 0 a ${e.tablaPaes.length - 1} correctas)` : ''}<textarea id="e-tabla" data-campo="tablaPaes" placeholder="100, 150, 187, …">${h(tabla)}</textarea></label>`;
+      })()}
         <span class="etiqueta" style="margin-top:4px">Referencia oficial (opcional)</span>
         <div class="dos">
           <label class="campo" for="e-ref1">Puntaje oficial del colegio<input id="e-ref1" data-campo="referencia.colegio" inputmode="numeric" value="${ref.colegio == null ? '' : ref.colegio}"></label>
@@ -503,6 +516,27 @@
   function analisisNivel(ens, cur) {
     return Estad.nivel(ens, paralelosDe(cur), (c) => hojasDe(ens, c), nombreNivel(cur));
   }
+  // Todo lo que necesita un informe PDF del curso activo en el ensayo activo
+  function contextoInforme() {
+    const ens = ensayoActivo(), cur = cursoActivo();
+    const A = Estad.analizar(ens, cur, hojasDe(ens, cur));
+    const H = historialDelCurso(ens, cur);
+    const nv = nivelDe(cur).nivel;
+    const N = nv ? analisisNivel(ens, cur) : null;
+    const HN = N && N.porCurso.length >= 2 ? Estad.historialNivel(ensayos(), paralelosDe(cur), (e, c) => hojasDe(e, c), Estad.grupoEnsayo(ens), nv) : null;
+    return { ens, cur, A, H, AL: Estad.alertas(A, H), G: Estad.grupos(A, E.grupoPor || 'eje'), N, HN, nivel: nombreNivel(cur) };
+  }
+  async function descargarInforme(tipo, ids) {
+    toast('Preparando el informe…');
+    try {
+      const ctx = contextoInforme();
+      const base = `${Almacen.id(ctx.cur.nombre)}_${Almacen.id(ctx.ens.nombre).slice(0, 30)}`;
+      const blob = tipo === 'curso' ? Informe.curso(ctx) : Informe.estudiantes(ctx, ids);
+      const nombre = tipo === 'curso' ? `informe_${base}.pdf`
+        : ids && ids.length === 1 ? `informe_${Almacen.id(ctx.A.estudiantes.find((x) => x.e.id === ids[0]).e.nombre)}_${base}.pdf` : `informes_estudiantes_${base}.pdf`;
+      await descargar(nombre, blob);
+    } catch (e) { console.error(e); toast('No se pudo crear el informe: ' + e.message); }
+  }
 
   // Aviso cuando falta el dato que convierte el logro en estándar o puntaje
   function avisoConversion(ens) {
@@ -528,7 +562,10 @@
     const pest = (id, t) => `<button role="tab" aria-selected="${tab === id}" data-accion="tab-est" data-a="${id}">${t}</button>`;
     const encabezado = `<div class="pestanas" role="tablist">${pest('curso', 'Curso')}${pest('nivel', 'Nivel')}${pest('alertas', 'Alertas')}${pest('preguntas', 'Preguntas')}${pest('estudiantes', 'Estudiantes')}${pest('historial', 'Historial')}</div>`;
     let cuerpo = '';
-    let exportar = `<button class="btn" data-accion="excel" ${A.hechas.length ? '' : 'disabled'}>${ICONO.bajar} Exportar el curso a Excel</button>`;
+    const sinHojas = A.hechas.length ? '' : 'disabled';
+    let exportar = `<div class="acciones-exportar"><button class="btn" data-accion="excel" ${sinHojas}>${ICONO.bajar} Exportar el curso a Excel</button>
+      <button class="btn" data-accion="informe-curso" ${sinHojas}>${ICONO.bajar} Informe PDF del curso</button>${tab === 'estudiantes' ? `
+      <button class="btn" data-accion="informe-estudiantes" ${sinHojas}>${ICONO.bajar} Informes PDF por estudiante</button>` : ''}</div>`;
     if (!A.hechas.length && tab !== 'historial' && tab !== 'nivel') {
       cuerpo = '<div class="tarjeta vacio">Cuando corrijas las primeras hojas de este ensayo verás aquí los gráficos.</div>';
     } else if (tab === 'curso') {
@@ -540,7 +577,7 @@
           ${cifraConversion(ens, R)}
           <div class="tarjeta"><span>Preguntas críticas</span><b class="num" style="color:var(--mal-texto)">${R.criticas}</b><span>bajo ${pct(Estad.CRITICA)} de acierto</span></div>
         </div>
-        <span class="nota num">${R.corregidas} de ${R.total} hojas corregidas · rango ${pct(R.min)}–${pct(R.max)} · omisión media ${pct(R.omision)}.</span>
+        <span class="nota num">${R.corregidas} de ${R.total} hojas corregidas · rango ${pct(R.min)}–${pct(R.max)} · omisión media ${pct(R.omision)}.${A.pilotos ? ` Se calcula sobre ${A.n} preguntas: las ${A.pilotos} piloto no cuentan.` : ''}</span>
         ${avisoConversion(ens)}
         ${A.estandares ? tarjetaGrafico('Estudiantes por estándar', Graficos.apilado100([{ nombre: cur.nombre, partes: partesEst(A) }]) + leyendaEstandares, 'Estándar estimado con los cortes del ensayo. Compara este curso con sus paralelos en la pestaña Nivel.') : ''}
         ${tarjetaGrafico('Distribución de notas', Graficos.histNotas(A.histNotas, esc.aprobacion), `Escala con ${pct(esc.exigencia)} de exigencia: con ${Math.ceil(esc.exigencia * A.n - 1e-9)} de ${A.n} correctas se obtiene un ${notaTx(esc.aprobacion)}. Se cambia en Ajustes.`)}
@@ -557,14 +594,14 @@
       const lista = orden === 'n' ? A.preguntas : A.preguntas.slice().sort((a, b) => a.acierto - b.acierto);
       const btn = (id, t) => `<button data-accion="orden-preg" data-a="${id}" aria-pressed="${orden === id}">${t}</button>`;
       cuerpo = `
-        ${tarjetaGrafico('Acierto por pregunta', Graficos.aciertoPreguntas(A.preguntas, Estad.CRITICA) + `<div class="leyenda-graf"><span><i style="background:var(--serie)"></i>Acierto</span><span><i style="background:var(--critico)"></i>Crítica (bajo ${pct(Estad.CRITICA)})</span></div>`, 'Toca una barra para ver la pregunta.')}
+        ${tarjetaGrafico('Acierto por pregunta', Graficos.aciertoPreguntas(A.preguntas, Estad.CRITICA) + `<div class="leyenda-graf"><span><i style="background:var(--serie)"></i>Acierto</span><span><i style="background:var(--critico)"></i>Crítica (bajo ${pct(Estad.CRITICA)})</span>${A.pilotos ? '<span><i style="background:var(--distractor)"></i>Piloto</span>' : ''}</div>`, 'Toca una barra para ver la pregunta.')}
         <div class="filtros">${btn('dificiles', 'Más difíciles primero')}${btn('n', 'En orden')}</div>
         <div class="leyenda-graf"><span><i style="background:var(--serie)"></i>Respuesta correcta</span><span><i style="background:var(--distractor)"></i>Otra alternativa</span><span><i style="background:var(--omitida)"></i>Omitida</span></div>
         <div class="tarjeta">${lista.map((p) => `<div class="pregunta-fila">
           <div class="encab"><b>Pregunta ${p.n} · clave ${p.clave}</b><span class="num" style="font-weight:700">${pct(p.acierto)}</span></div>
           ${Graficos.opciones(p, A.letras)}
           <span class="meta">${h([p.eje, p.habilidad].filter(Boolean).join(' · '))}${p.distractor ? ` · más elegida entre las incorrectas: ${p.distractor.letra} (${pct(p.distractor.n / (p.total || 1))})` : ''}${p.discriminacion != null ? ` · discriminación ${p.discriminacion.toFixed(2)}${p.discriminacion < 0.2 ? ' (baja)' : ''}` : ''}</span>
-          ${p.critica ? '<span><span class="etiqueta-critica">Crítica</span></span>' : ''}
+          ${p.critica ? '<span><span class="etiqueta-critica">Crítica</span></span>' : ''}${p.piloto ? '<span><span class="estimado">Piloto · no cuenta</span></span>' : ''}
         </div>`).join('')}</div>
         <span class="nota">Discriminación: diferencia de acierto entre el 27% de mejor y el 27% de menor logro. Sobre 0,3 la pregunta distingue bien; bajo 0,2 conviene revisarla. Para ver si una pregunta le fue mal a todo el nivel o solo a este curso, abre la pestaña Nivel.</span>`;
     } else if (tab === 'estudiantes') {
@@ -749,9 +786,10 @@
         ${H.puntos.length >= 2 ? tarjetaGrafico('Evolución', Graficos.linea(serie, H.puntos.map((p) => etiquetaEnsayo(p.ensayo)), { resaltar: H.puntos.map((p) => p.media) }) + '<div class="leyenda-graf"><span><i style="background:var(--serie)"></i>Estudiante</span><span><i class="linea-key" style="color:var(--distractor)"></i>Promedio del curso</span></div>') : ''}
         <section class="tarjeta pad"><span class="etiqueta">Preguntas incorrectas u omitidas (${falladas.length})</span>
           <div class="tabla-mini"><table><thead><tr><th>N°</th><th>Marcó</th><th>Clave</th><th>Eje</th><th class="num">% curso</th></tr></thead><tbody>
-          ${falladas.map((p) => `<tr><td class="num">${p.n}</td><td>${P.r[p.i] || '–'}</td><td>${p.clave}</td><td class="ajusta">${h(p.eje)}</td><td class="num">${pct(p.acierto)}</td></tr>`).join('')}</tbody></table></div>
+          ${falladas.map((p) => `<tr><td class="num">${p.n}${p.piloto ? '<small> (piloto)</small>' : ''}</td><td>${P.r[p.i] || '–'}</td><td>${p.clave}</td><td class="ajusta">${h(p.eje)}</td><td class="num">${pct(p.acierto)}</td></tr>`).join('')}</tbody></table></div>
         </section>
         <button class="btn" data-accion="ver-hoja" data-a="${h(P.e.id)}">Ver o corregir su hoja</button>
+        <button class="btn" data-accion="informe-estudiante">${ICONO.bajar} Informe PDF de este estudiante</button>
       </div></div>`;
   }
 
@@ -1066,7 +1104,7 @@
     const rev = E.revision;
     const id = idResultados(rev.ensayo.id, rev.curso.id);
     const doc = Almacen.obtener('resultados', id) || { ensayo: rev.ensayo.id, curso: rev.curso.id, hojas: {} };
-    const correctas = rev.ensayo.preguntas.filter((p, i) => rev.respuestas[i] === p.clave).length;
+    const { correctas, n } = Estad.contar(rev.ensayo, rev.respuestas);
     doc.hojas = { ...doc.hojas, [rev.estudiante.id]: {
       respuestas: rev.respuestas, correctas, fecha: new Date().toISOString(),
       origen: rev.origen === 'guardada' ? (doc.hojas[rev.estudiante.id] || {}).origen || 'qr' : rev.origen,
@@ -1074,7 +1112,7 @@
     } };
     try { await Almacen.guardar('resultados', id, doc); } catch (e) { toast(e.message); return; }
     if (rev.curso.id !== config().curso || rev.ensayo.id !== config().ensayo) await fijarConfig({ curso: rev.curso.id, ensayo: rev.ensayo.id });
-    toast(`Guardado: ${corto(rev.estudiante.nombre)}, ${correctas} de ${rev.ensayo.preguntas.length}`);
+    toast(`Guardado: ${corto(rev.estudiante.nombre)}, ${correctas} de ${n}`);
     const venia = rev.origen;
     E.revision = null;
     if (venia === 'guardada') { E.pantalla = 'curso'; render(); return; }
@@ -1085,10 +1123,19 @@
   // ---------- Ensayos y cursos ----------
   function leerFormularioEnsayo() {
     const e = E.ensayoEditado;
+    const selTabla = document.getElementById('e-tabla-id');
+    const tablaId = selTabla ? selTabla.value : 'propia';
+    let pilotos = null;
     document.querySelectorAll('[data-campo]').forEach((el) => {
       const k = el.dataset.campo;
       if (k === 'alternativas') e.alternativas = parseInt(el.value, 10);
-      else if (k === 'tablaPaes') {
+      else if (k === 'tablaId') {
+        if (Estad.TABLAS_PAES[el.value]) e.tablaPaes = Estad.TABLAS_PAES[el.value].puntajes.slice();
+        else if (el.value === '') delete e.tablaPaes;
+      } else if (k === 'pilotos') {
+        pilotos = new Set(el.value.split(/[^0-9]+/).map((x) => parseInt(x, 10)).filter((x) => x > 0));
+      } else if (k === 'tablaPaes') {
+        if (tablaId !== 'propia') return;
         const nums = el.value.split(/[\s,;]+/).map((x) => parseFloat(x)).filter((x) => !isNaN(x));
         if (nums.length) e.tablaPaes = nums.map(Math.round); else delete e.tablaPaes;
       } else if (k.includes('.')) {
@@ -1102,10 +1149,11 @@
       } else if (k === 'clave') {
         const letras = el.value.toUpperCase().replace(/[^A-E]/g, '');
         if (letras !== e.preguntas.map((p) => p.clave).join('')) {
-          e.preguntas = letras.split('').map((l, i) => ({ n: i + 1, clave: l, eje: (e.preguntas[i] || {}).eje || '', habilidad: (e.preguntas[i] || {}).habilidad || '', contenido: (e.preguntas[i] || {}).contenido || '' }));
+          e.preguntas = letras.split('').map((l, i) => ({ n: i + 1, clave: l, eje: (e.preguntas[i] || {}).eje || '', habilidad: (e.preguntas[i] || {}).habilidad || '', contenido: (e.preguntas[i] || {}).contenido || '', ...((e.preguntas[i] || {}).piloto ? { piloto: true } : {}) }));
         }
       } else e[k] = el.value.trim();
     });
+    if (pilotos) e.preguntas = e.preguntas.map(({ piloto, ...p }) => (pilotos.has(p.n) ? { ...p, piloto: true } : p));
   }
 
   async function guardarEnsayo() {
@@ -1114,6 +1162,12 @@
     if (!e.nombre) { toast('Ponle nombre al ensayo.'); return; }
     if (!e.preguntas.length) { toast('Falta la clave: carga la plantilla Excel o escribe las letras.'); return; }
     if (e.preguntas.length > Diseno.RESP.max) { toast(`La hoja admite hasta ${Diseno.RESP.max} preguntas.`); return; }
+    if (e.tipo === 'PAES' && !(e.tablaPaes && e.tablaPaes.length)) {
+      const id = Estad.tablaParaAsignatura(e.asignatura);
+      if (id) e.tablaPaes = Estad.TABLAS_PAES[id].puntajes.slice();
+    }
+    if (e.tipo !== 'PAES') delete e.tablaPaes;
+    if (e.tipo !== 'SIMCE') delete e.cortes;
     if (e.cortes && (e.cortes.elemental == null) !== (e.cortes.adecuado == null)) { toast('Completa los dos cortes de estándar, o deja ambos vacíos.'); return; }
     if (e.cortes && e.cortes.elemental != null && !(e.cortes.elemental > 0 && e.cortes.elemental < e.cortes.adecuado && e.cortes.adecuado <= 1)) { toast('El corte de Elemental debe ser menor que el de Adecuado, ambos entre 1 y 100.'); return; }
     const malas = e.preguntas.filter((p) => 'ABCDE'.indexOf(p.clave) >= e.alternativas);
@@ -1227,6 +1281,9 @@
       E.hojaPregunta = null; E.mantenerScroll = true; render();
     },
     guardar: () => guardarRevision(),
+    'informe-curso': () => descargarInforme('curso'),
+    'informe-estudiantes': () => descargarInforme('estudiantes'),
+    'informe-estudiante': () => descargarInforme('estudiantes', [E.estAbierto]),
     excel: async () => {
       const ens = ensayoActivo(), cur = cursoActivo();
       await descargar(`resultados_${Almacen.id(cur.nombre)}_${Almacen.id(ens.nombre).slice(0, 30)}.xlsx`, Excel.exportarResultados(ens, cur, hojasDe(ens, cur), historialDelCurso(ens, cur)));

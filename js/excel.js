@@ -38,7 +38,8 @@ const Excel = (() => {
       const n = parseInt(f[0], 10);
       const clave = texto(f[1]).toUpperCase();
       if (!n || !/^[A-E]$/.test(clave)) return;
-      preguntas.push({ n, clave, eje: texto(f[2]), habilidad: texto(f[3]), contenido: texto(f[4]) });
+      const piloto = /^(s|x|1|p|y)/i.test(texto(f[5]));
+      preguntas.push({ n, clave, eje: texto(f[2]), habilidad: texto(f[3]), contenido: texto(f[4]), ...(piloto ? { piloto: true } : {}) });
     });
     preguntas.sort((a, b) => a.n - b.n);
     if (!preguntas.length) throw new Error('No encontré preguntas con clave (A a E) en la hoja "Preguntas".');
@@ -96,13 +97,14 @@ const Excel = (() => {
 
   // Estadísticas de un ensayo en un curso (las usa la exportación y la pantalla de avance)
   function calcular(ensayo, curso, hojas) {
-    const n = ensayo.preguntas.length;
+    const n = Estad.puntuables(ensayo).length || 1;
     const letras = 'ABCDE'.slice(0, ensayo.alternativas);
     const filasEst = curso.estudiantes.map((e) => {
       const h = hojas[e.id];
       if (!h) return { e, h: null };
       let correctas = 0, omitidas = 0;
       ensayo.preguntas.forEach((p, i) => {
+        if (p.piloto) return;
         const r = h.respuestas[i] || '';
         if (!r) omitidas++; else if (r === p.clave) correctas++;
       });
@@ -146,6 +148,7 @@ const Excel = (() => {
     agregar('Resumen', [
       ['Ensayo', ensayo.nombre], ['Asignatura', ensayo.asignatura || ''], ['Curso', curso.nombre], ['Fecha', ensayo.fecha || ''],
       ['Hojas corregidas', R.corregidas], ['Estudiantes del curso', R.total],
+      ['Preguntas que cuentan', A.n], ['Preguntas piloto (no cuentan)', A.pilotos],
       ['% logro promedio', pct(R.media)], ['% logro mediana', pct(R.mediana)], ['Desviación estándar (pts)', pct(R.desviacion)],
       ['% logro mínimo', pct(R.min)], ['% logro máximo', pct(R.max)], ['% omisión promedio', pct(R.omision)],
       [`Preguntas críticas (bajo ${pct(Estad.CRITICA)}% de acierto)`, R.criticas],
@@ -171,8 +174,8 @@ const Excel = (() => {
       ...A.hechas.map((x) => [x.e.lista, x.e.nombre, ...x.r]),
     ], [9, 34]);
     agregar('Por pregunta', [
-      ['Pregunta', 'Clave', 'Eje / Contenido', 'Habilidad', 'Contenido específico', '% acierto', 'Discriminación', 'Crítica', ...letras.map((l) => '% ' + l), '% omitida'],
-      ...A.preguntas.map((p) => [p.n, p.clave, p.eje, p.habilidad, p.contenido || '', pct(p.acierto),
+      ['Pregunta', 'Clave', 'Eje / Contenido', 'Habilidad', 'Contenido específico', 'Piloto', '% acierto', 'Discriminación', 'Crítica', ...letras.map((l) => '% ' + l), '% omitida'],
+      ...A.preguntas.map((p) => [p.n, p.clave, p.eje, p.habilidad, p.contenido || '', p.piloto ? 'Sí (no cuenta)' : '', pct(p.acierto),
         p.discriminacion == null ? '' : Math.round(p.discriminacion * 100) / 100, p.critica ? 'Sí' : '',
         ...letras.map((l) => pct((p.cuenta[l] || 0) / (p.total || 1))), pct(p.omision)]),
     ], [9, 7, 28, 22, 26, 10, 13, 8]);

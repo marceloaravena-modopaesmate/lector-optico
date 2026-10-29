@@ -77,6 +77,29 @@ const Estad = (() => {
     return t[Math.min(correctas, t.length - 1)];
   }
 
+  // Tablas de conversión PAES (n° de respuestas correctas → puntaje), sin contar las preguntas piloto
+  const TABLAS_PAES = {
+    m1: { nombre: 'Competencia Matemática 1 (M1)', buscar: /\bM1\b|matem[aá]tica\s*1/i, puntajes: [100, 173, 196, 216, 236, 255, 273, 290, 305, 318, 331, 345, 360, 375, 389, 399, 408, 417, 426, 438, 452, 467, 480, 490, 498, 504, 511, 519, 530, 543, 558, 571, 582, 590, 597, 603, 611, 622, 635, 650, 664, 676, 685, 694, 704, 716, 730, 746, 761, 775, 789, 804, 821, 840, 860, 880, 903, 927, 955, 986, 1000] },
+    lectora: { nombre: 'Competencia Lectora', buscar: /lector|lectura/i, puntajes: [100, 149, 172, 193, 214, 234, 253, 269, 284, 298, 313, 330, 347, 361, 373, 383, 393, 404, 417, 432, 447, 461, 472, 480, 487, 495, 504, 516, 531, 546, 560, 571, 580, 587, 594, 603, 614, 629, 644, 659, 671, 680, 689, 699, 711, 725, 741, 758, 772, 786, 799, 814, 832, 852, 871, 892, 913, 936, 963, 991, 1000] },
+    m2: { nombre: 'Competencia Matemática 2 (M2)', buscar: /\bM2\b|matem[aá]tica\s*2/i, puntajes: [100, 204, 231, 255, 278, 298, 317, 336, 354, 371, 386, 399, 412, 426, 441, 456, 470, 481, 491, 501, 512, 525, 540, 553, 565, 574, 583, 592, 603, 616, 630, 644, 656, 666, 676, 687, 699, 714, 729, 744, 757, 770, 785, 801, 819, 837, 856, 876, 898, 1000] },
+    ciencias: { nombre: 'Ciencias', buscar: /ciencias(?!\s*sociales)/i, puntajes: [100, 127, 144, 165, 185, 204, 221, 236, 250, 264, 278, 293, 306, 318, 327, 335, 345, 355, 368, 381, 393, 402, 409, 415, 420, 426, 435, 445, 458, 470, 481, 489, 494, 499, 503, 507, 513, 521, 533, 545, 558, 568, 575, 581, 585, 589, 593, 600, 610, 621, 634, 646, 656, 663, 669, 674, 681, 690, 701, 714, 728, 739, 749, 759, 769, 780, 795, 810, 825, 840, 856, 874, 893, 915, 938, 1000] },
+    historia: { nombre: 'Historia y Ciencias Sociales', buscar: /historia/i, puntajes: [100, 132, 158, 181, 203, 224, 244, 263, 279, 294, 308, 324, 341, 357, 372, 383, 393, 402, 413, 426, 441, 457, 471, 482, 490, 497, 504, 513, 525, 539, 555, 569, 581, 590, 597, 604, 612, 623, 637, 653, 668, 681, 692, 701, 711, 722, 736, 753, 770, 785, 799, 814, 829, 848, 868, 888, 910, 932, 957, 985, 1000] },
+  };
+  // Tabla que corresponde a una asignatura PAES (o null si no se reconoce)
+  function tablaParaAsignatura(asignatura) {
+    const t = String(asignatura || '');
+    for (const id of ['m1', 'm2', 'historia', 'lectora', 'ciencias']) if (TABLAS_PAES[id].buscar.test(t)) return id;
+    return null;
+  }
+
+  // Preguntas que cuentan para el puntaje (todas menos las piloto)
+  const puntuables = (ensayo) => ensayo.preguntas.filter((p) => !p.piloto);
+  function contar(ensayo, respuestas) {
+    let correctas = 0, n = 0;
+    ensayo.preguntas.forEach((p, i) => { if (p.piloto) return; n++; if ((respuestas[i] || '') === p.clave) correctas++; });
+    return { correctas, n, logro: n ? correctas / n : 0 };
+  }
+
   // Fecha del ensayo para ordenar el historial (acepta dd-mm-aaaa o la fecha de creación)
   function fechaOrden(ensayo) {
     const m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(ensayo.fecha || '');
@@ -103,7 +126,10 @@ const Estad = (() => {
    * hojas: { idEstudiante: { respuestas: ['A', '', ...] } }
    */
   function analizar(ensayo, curso, hojas) {
-    const n = ensayo.preguntas.length;
+    // Las preguntas piloto se muestran en el análisis por pregunta, pero no cuentan para el logro, la nota ni el puntaje
+    const cuentan = ensayo.preguntas.map((p) => !p.piloto);
+    const n = cuentan.filter(Boolean).length || 1;
+    const pilotos = ensayo.preguntas.length - cuentan.filter(Boolean).length;
     const letras = 'ABCDE'.slice(0, ensayo.alternativas).split('');
 
     const estudiantes = curso.estudiantes.map((e) => {
@@ -111,8 +137,8 @@ const Estad = (() => {
       if (!h) return { e, corregida: false };
       const r = ensayo.preguntas.map((_, i) => h.respuestas[i] || '');
       const aciertos = ensayo.preguntas.map((p, i) => r[i] === p.clave);
-      const correctas = aciertos.filter(Boolean).length;
-      const omitidas = r.filter((x) => !x).length;
+      const correctas = aciertos.filter((a, i) => a && cuentan[i]).length;
+      const omitidas = r.filter((x, i) => !x && cuentan[i]).length;
       const logro = correctas / n;
       return {
         e, corregida: true, r, aciertos, correctas, omitidas, incorrectas: n - correctas - omitidas, logro,
@@ -139,13 +165,14 @@ const Estad = (() => {
         ...p, i, cuenta, total, acierto, omision: total ? cuenta[''] / total : 0,
         discriminacion: hechas.length >= 4 ? pSup - pInf : null,
         distractor: distractores[0] && distractores[0].n ? distractores[0] : null,
-        critica: total > 0 && acierto < CRITICA,
+        critica: !p.piloto && total > 0 && acierto < CRITICA,
       };
     });
+    const validas = preguntas.filter((p) => !p.piloto);
 
     const agrupar = (campo) => {
       const g = new Map();
-      preguntas.forEach((p) => {
+      validas.forEach((p) => {
         const clave = p[campo] || 'Sin dato';
         if (!g.has(clave)) g.set(clave, { nombre: clave, indices: [] });
         g.get(clave).indices.push(p.i);
@@ -179,7 +206,7 @@ const Estad = (() => {
     const puntajes = tieneTabla(ensayo) ? hechas.map((x) => x.puntaje).filter((v) => v != null) : [];
 
     return {
-      ensayo, curso, n, letras, estudiantes, hechas, preguntas, porEje, porHabilidad, matriz, histograma, histNotas, tramos, estandares,
+      ensayo, curso, n, pilotos, letras, estudiantes, hechas, preguntas, porEje, porHabilidad, matriz, histograma, histNotas, tramos, estandares,
       resumen: {
         corregidas: hechas.length, total: curso.estudiantes.length,
         media: media(logros), mediana: mediana(logros), desviacion: desviacion(logros),
@@ -326,6 +353,7 @@ const Estad = (() => {
   }
 
   return {
+    TABLAS_PAES, tablaParaAsignatura, puntuables, contar,
     TRAMOS, ESTANDARES, CRITICA, BRECHA, POR_DEFECTO, configurar, get conf() { return conf; },
     analizar, perfil, historial, nivel, historialNivel, alertas, grupos,
     tramoDe, nota, notaTexto, cortesDe, estandarDe, tieneTabla, puntajeDe, nivelDe, grupoEnsayo, fechaOrden, media,

@@ -62,9 +62,9 @@ const Graficos = (() => {
     preguntas.forEach((p, i) => {
       const x = izq + i * ancho + (ancho > 4 ? 0.5 : 0.15);
       const w = Math.max(1, ancho - (ancho > 4 ? 1 : 0.3));
-      const estilo = p.critica ? 'fill:var(--critico)' : 'fill:var(--serie)';
+      const estilo = p.piloto ? 'fill:var(--distractor)' : p.critica ? 'fill:var(--critico)' : 'fill:var(--serie)';
       g += barraV(x, y(p.acierto), w, y(0) - y(p.acierto), y(0), estilo,
-        `Pregunta ${p.n}: ${pct(p.acierto)} de acierto · clave ${p.clave}${p.eje ? ' · ' + p.eje : ''}`);
+        `Pregunta ${p.n}${p.piloto ? ' (piloto, no cuenta)' : ''}: ${pct(p.acierto)} de acierto · clave ${p.clave}${p.eje ? ' · ' + p.eje : ''}`);
     });
     const marcas = n <= 20 ? 1 : n <= 40 ? 5 : 10;
     preguntas.forEach((p, i) => {
