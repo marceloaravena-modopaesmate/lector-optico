@@ -348,3 +348,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 /* Logo del colegio en Ajustes */
 .logo-fila { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .logo-fila img { width: 56px; height: 56px; object-fit: contain; border-radius: 10px; border: 1px solid var(--borde); background: #fff; }
+
+/* Aviso para instalar la app */
+.aviso.instalar { flex-wrap: wrap; }
+.aviso.instalar .fila-botones { width: 100%; }

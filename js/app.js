@@ -141,6 +141,19 @@
     </header>`;
   }
 
+  // Instalar la app: botón directo donde el navegador lo permite (Android) e instrucciones en iPhone
+  let pedidoInstalar = null;
+  addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); pedidoInstalar = ev; if (E.pantalla === 'inicio') render(); });
+  addEventListener('appinstalled', () => { pedidoInstalar = null; render(); });
+  const instalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  const enIphone = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+  function avisoInstalar() {
+    if (instalada() || location.protocol === 'file:' || E.ocultarInstalar) return '';
+    if (pedidoInstalar) return `<div class="aviso ok instalar">${ICONO.bajar}<span>Instala la app en este equipo para abrirla como una aplicación, incluso sin internet.</span><div class="fila-botones"><button class="btn primario" data-accion="instalar">Instalar app</button><button class="btn" data-accion="ocultar-instalar">Ahora no</button></div></div>`;
+    if (enIphone()) return `<div class="aviso ok instalar">${ICONO.bajar}<span>Para instalar la app en el iPhone, ábrela en <b>Safari</b>, toca Compartir (el cuadrado con la flecha) y elige <b>Agregar a inicio</b>.</span><div class="fila-botones"><button class="btn" data-accion="ocultar-instalar">Entendido</button></div></div>`;
+    return '';
+  }
+
   function pInicio() {
     const ens = ensayoActivo(), cur = cursoActivo();
     let tarjeta;
@@ -194,7 +207,7 @@
     return `<div class="pantalla">
       <header class="cabecera"><div class="titulos"><span class="saludo">${saludo()}</span><span class="marca">Lector óptico</span></div>
       <button class="btn-redondo" data-accion="ir" data-a="ajustes" aria-label="Ajustes y respaldo">${ICONO.ajustes}</button></header>
-      <div class="cuerpo">${tarjeta}
+      <div class="cuerpo">${avisoInstalar()}${tarjeta}
         <div class="mosaico">
           <button data-accion="ir" data-a="ensayos">${ICONO.doc}<b>Ensayos</b><span>Claves, ejes y habilidades</span></button>
           <button data-accion="ir" data-a="cursos">${ICONO.grupo}<b>Cursos</b><span>Listas y hojas con QR</span></button>
@@ -1340,6 +1353,8 @@
       E.hojaPregunta = null; E.mantenerScroll = true; render();
     },
     guardar: () => guardarRevision(),
+    instalar: async () => { if (!pedidoInstalar) return; pedidoInstalar.prompt(); await pedidoInstalar.userChoice; pedidoInstalar = null; render(); },
+    'ocultar-instalar': () => { E.ocultarInstalar = true; render(); },
     'informe-curso': () => descargarInforme('curso'),
     'informe-estudiantes': () => descargarInforme('estudiantes'),
     'informe-estudiante': () => descargarInforme('estudiantes', [E.estAbierto]),
