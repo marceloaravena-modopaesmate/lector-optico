@@ -372,7 +372,7 @@
   function pEnsayo() {
     const e = E.ensayoEditado;
     const nuevo = !Almacen.obtener('ensayos', e.id);
-    const asignaturas = ['PAES Competencia Matemática (M1)', 'PAES Competencia Matemática (M2)', 'PAES Competencia Lectora', 'PAES Ciencias', 'PAES Historia y Ciencias Sociales', 'SIMCE Lectura', 'SIMCE Matemática', 'SIMCE Ciencias Naturales', 'SIMCE Historia'];
+    const asignaturas = Temarios.NOMBRES;
     const filas = e.preguntas.slice(0, 6).map((p) => `<tr><td class="num">${p.n}</td><td><b>${h(p.clave)}</b></td><td>${h(p.eje)}</td><td>${h(p.habilidad)}</td></tr>`).join('');
     const ejes = new Set(e.preguntas.map((p) => p.eje).filter(Boolean)).size;
     const habs = new Set(e.preguntas.map((p) => p.habilidad).filter(Boolean)).size;
@@ -401,6 +401,7 @@
             <input id="e-pilotos" data-campo="pilotos" value="${h(e.preguntas.filter((p) => p.piloto).map((p) => p.n).join(', '))}" placeholder="Ej.: 12, 25, 38, 51, 64" inputmode="numeric"></label>
           <span class="nota">${e.preguntas.length ? `${e.preguntas.filter((p) => p.piloto).length} piloto${e.preguntas.filter((p) => p.piloto).length === 1 ? '' : 's'} · ${Estad.puntuables(e).length} preguntas cuentan.` : ''} Se pueden marcar también en la columna "Piloto" de la plantilla Excel.</span>
         </section>
+        ${seccionTemario(e)}
         ${seccionConversion(e)}
         <section class="tarjeta pad"><span class="etiqueta">4 · Hojas para un curso</span>
           ${cursos().length ? `<label class="campo" for="e-curso">Curso<select id="e-curso">${cursos().map((c) => `<option value="${h(c.id)}">${h(c.nombre)} · ${c.estudiantes.length} estudiantes</option>`).join('')}</select></label>
@@ -411,6 +412,21 @@
       </div>
       <div class="barra-acciones"><button class="btn primario grande" data-accion="guardar-ensayo">Guardar ensayo</button></div>
     </div>`;
+  }
+
+  // Temario de la asignatura: ejes, contenidos y habilidades que conviene usar en la plantilla
+  function seccionTemario(e) {
+    const t = Temarios.de(e.asignatura);
+    if (!t) return '';
+    const rev = e.preguntas.length ? Temarios.revisar(e) : null;
+    const aviso = rev && (rev.ejes.length || rev.habs.length)
+      ? `<div class="aviso rev">${ICONO.alerta}<span>${rev.ejes.length ? `Ejes que no están en el temario: ${h(rev.ejes.join(', '))}. ` : ''}${rev.habs.length ? `Habilidades que no están en el temario: ${h(rev.habs.join(', '))}. ` : ''}Usa los nombres del temario para que el informe recomiende los contenidos correctos.</span></div>` : '';
+    return `<details class="tarjeta pad temario"><summary><span class="etiqueta">Temario de ${h(e.asignatura)}</span></summary>
+      ${aviso}
+      ${t.ejes.map((x) => `<div><b>${h(x.nombre)}</b><ul>${x.contenidos.map((c) => `<li>${h(c)}</li>`).join('')}</ul></div>`).join('')}
+      <div><b>Habilidades</b><ul>${t.habilidades.map((x) => `<li><b>${h(x.nombre)}</b>: ${h(x.descripcion)}</li>`).join('')}</ul></div>
+      <span class="nota">Escribe en la plantilla Excel el eje y la habilidad de cada pregunta con estos nombres, y si quieres el contenido. El informe los usa para decir qué reforzar.</span>
+    </details>`;
   }
 
   // Estándares SIMCE o tabla de puntaje PAES, y la referencia oficial con que comparar
@@ -564,7 +580,7 @@
     let cuerpo = '';
     const sinHojas = A.hechas.length ? '' : 'disabled';
     let exportar = `<div class="acciones-exportar"><button class="btn" data-accion="excel" ${sinHojas}>${ICONO.bajar} Exportar el curso a Excel</button>
-      <button class="btn" data-accion="informe-curso" ${sinHojas}>${ICONO.bajar} Informe PDF del curso</button>${tab === 'estudiantes' ? `
+      <button class="btn" data-accion="informe-curso" ${sinHojas}>${ICONO.bajar} Informe PDF completo (curso y estudiantes)</button>${tab === 'estudiantes' ? `
       <button class="btn" data-accion="informe-estudiantes" ${sinHojas}>${ICONO.bajar} Informes PDF por estudiante</button>` : ''}</div>`;
     if (!A.hechas.length && tab !== 'historial' && tab !== 'nivel') {
       cuerpo = '<div class="tarjeta vacio">Cuando corrijas las primeras hojas de este ensayo verás aquí los gráficos.</div>';

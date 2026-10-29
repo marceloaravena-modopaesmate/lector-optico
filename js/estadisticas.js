@@ -352,10 +352,81 @@ const Estad = (() => {
       .sort((a, b) => b.estudiantes.length - a.estudiantes.length);
   }
 
+  // Confiabilidad del ensayo en el grupo (KR-20). Sobre 0,7 los resultados son consistentes; necesita al menos 5 hojas.
+  function confiabilidad(A) {
+    const validas = A.preguntas.filter((p) => !p.piloto);
+    const k = validas.length, totales = A.hechas.map((x) => x.correctas);
+    if (k < 2 || totales.length < 5) return null;
+    const m = media(totales), v = totales.reduce((s, x) => s + (x - m) ** 2, 0) / totales.length;
+    if (!v) return null;
+    const spq = validas.reduce((s, p) => s + p.acierto * (1 - p.acierto), 0);
+    return Math.max(0, Math.min(1, (k / (k - 1)) * (1 - spq / v)));
+  }
+
+  // Clasificación de una pregunta por dificultad (acierto) y discriminación
+  function calidadPregunta(p) {
+    const dif = p.acierto >= 0.75 ? 'fácil' : p.acierto >= 0.4 ? 'media' : 'difícil';
+    const d = p.discriminacion;
+    const disc = d == null ? null : d >= 0.3 ? 'buena' : d >= 0.2 ? 'aceptable' : 'baja';
+    return { dif, disc, revisar: d != null && d < 0.2 };
+  }
+
+  /**
+   * Análisis técnico de un estudiante: posición en el curso, fortalezas y debilidades por eje y habilidad,
+   * patrón de respuestas y cuánto le falta para el siguiente tramo.
+   */
+  function tecnico(A, idEst, AN) {
+    const P = perfil(A, idEst, AN);
+    if (!P) return null;
+    const logros = A.hechas.map((x) => x.logro);
+    const bajo = logros.filter((v) => v < P.logro).length, igual = logros.filter((v) => v === P.logro).length;
+    const percentil = Math.round(((bajo + igual / 2) / logros.length) * 100);
+    const de = A.resumen.desviacion;
+    const z = de ? (P.logro - A.resumen.media) / de : 0;
+    const validas = A.preguntas.filter((p) => !p.piloto);
+    const marcar = (gs) => gs.filter((g) => g.nombre !== 'Sin dato').map((g) => ({ ...g, dif: g.propio - g.curso }));
+    const ejes = marcar(P.porEje), habs = marcar(P.porHabilidad);
+    const fuerte = (g) => g.propio >= 0.75 || (g.dif >= 0.1 && g.propio >= 0.5);
+    const debil = (g) => g.propio < 0.5 || g.dif <= -0.1;
+    // Fáciles para el curso que falló (posible descuido) y difíciles que acertó
+    const falloFaciles = validas.filter((p) => p.acierto >= 0.7 && !P.aciertos[p.i] && P.r[p.i]);
+    const aciertoDificiles = validas.filter((p) => p.acierto < 0.4 && P.aciertos[p.i]);
+    // Coincidencia con el error más común del curso
+    const conDistractor = validas.filter((p) => p.distractor && P.r[p.i] === p.distractor.letra);
+    const erradas = validas.filter((p) => P.r[p.i] && !P.aciertos[p.i]);
+    // Siguiente meta
+    let meta = null;
+    if (tieneTabla(A.ensayo) && P.puntaje != null) {
+      const objetivo = Math.floor(P.puntaje / 50) * 50 + 50;
+      for (let c = P.correctas + 1; c <= A.n; c++) {
+        const pt = puntajeDe(c, A.ensayo);
+        if (pt != null && pt >= objetivo) { meta = { faltan: c - P.correctas, texto: `${pt} puntos`, valor: pt }; break; }
+      }
+    } else if (cortesDe(A.ensayo)) {
+      const c = cortesDe(A.ensayo);
+      const sig = P.logro < c.elemental ? ['Elemental', c.elemental] : P.logro < c.adecuado ? ['Adecuado', c.adecuado] : null;
+      if (sig) meta = { faltan: Math.ceil(sig[1] * A.n - 1e-9) - P.correctas, texto: `el nivel ${sig[0]}` };
+    }
+    if (!meta) {
+      const ap = conf.escala.aprobacion;
+      if (P.nota < ap) { let c = P.correctas; while (c < A.n && nota((c) / A.n) < ap) c++; meta = { faltan: c - P.correctas, texto: `nota ${notaTexto(ap)}` }; }
+    }
+    // Contenidos de las preguntas falladas (si el ensayo los trae)
+    const contenidos = new Map();
+    validas.filter((p) => !P.aciertos[p.i] && p.contenido).forEach((p) => contenidos.set(p.contenido, (contenidos.get(p.contenido) || 0) + 1));
+    return {
+      ...P, percentil, z, ejes, habs,
+      fortalezas: { ejes: ejes.filter(fuerte).sort((a, b) => b.propio - a.propio), habs: habs.filter(fuerte).sort((a, b) => b.propio - a.propio) },
+      debilidades: { ejes: ejes.filter(debil).sort((a, b) => a.propio - b.propio), habs: habs.filter(debil).sort((a, b) => a.propio - b.propio) },
+      falloFaciles, aciertoDificiles, conDistractor, erradas, meta,
+      contenidosFallados: [...contenidos].sort((a, b) => b[1] - a[1]).map(([c, n]) => ({ contenido: c, n })),
+    };
+  }
+
   return {
     TABLAS_PAES, tablaParaAsignatura, puntuables, contar,
     TRAMOS, ESTANDARES, CRITICA, BRECHA, POR_DEFECTO, configurar, get conf() { return conf; },
-    analizar, perfil, historial, nivel, historialNivel, alertas, grupos,
+    analizar, perfil, tecnico, confiabilidad, calidadPregunta, historial, nivel, historialNivel, alertas, grupos,
     tramoDe, nota, notaTexto, cortesDe, estandarDe, tieneTabla, puntajeDe, nivelDe, grupoEnsayo, fechaOrden, media,
   };
 })();
