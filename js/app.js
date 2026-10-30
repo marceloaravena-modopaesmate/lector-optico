@@ -906,7 +906,14 @@
     });
   }
 
+  // Versión instalada (nombre de la caché del service worker), para comprobar que la app se actualizó
+  function mostrarVersion() {
+    if (!window.caches) return;
+    caches.keys().then((k) => { const v = k.find((x) => x.startsWith('lector-')); const el = document.getElementById('version-app'); if (el) el.textContent = v ? `Versión ${v.slice(7, 14)}` : 'Versión sin instalar'; }).catch(() => {});
+  }
+
   function pAjustes() {
+    setTimeout(mostrarVersion, 0);
     return `<div class="pantalla">${cabecera('Ajustes y respaldo', Almacen.modo === 'nube' ? 'Tus datos se guardan en tu cuenta de Claude' : 'Tus datos se guardan en este navegador')}
       <div class="cuerpo">
         ${seccionColegio()}
@@ -934,6 +941,7 @@
           <div class="fila-botones"><button class="btn" data-accion="ejemplo">Ejemplo simple</button><button class="btn" data-accion="ejemplo-colegio">Ejemplo de colegio</button></div>
           ${Almacen.lista('cursos').some((c) => c.ejemplo) || Almacen.lista('ensayos').some((e) => e.ejemplo) ? '<button class="btn" style="color:var(--mal-texto)" data-accion="borrar-ejemplo">Borrar los datos de ejemplo</button>' : ''}
         </section>
+        <span class="nota" id="version-app" style="text-align:center"></span>
       </div>${nav('')}</div>`;
   }
 

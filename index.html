@@ -32,7 +32,20 @@
 <script src="js/informe.js"></script>
 <script src="js/ejemplo.js"></script>
 <script src="js/app.js"></script>
-<script>if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+<script>if ('serviceWorker' in navigator) addEventListener('load', () => {
+  const habia = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update(); });
+  });
+  let recargada = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!habia || recargada) return;
+    if (document.visibilityState === 'hidden') { recargada = true; location.reload(); return; }
+    const b = document.createElement('button'); b.className = 'aviso-version'; b.textContent = 'Hay una versión nueva. Toca para actualizar';
+    b.onclick = () => { recargada = true; location.reload(); }; document.body.appendChild(b);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && !recargada) { recargada = true; location.reload(); } });
+  });
+});
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist();</script>
 
 </html>
