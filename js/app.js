@@ -855,8 +855,52 @@
           ${falladas.map((p) => `<tr><td class="num">${p.n}${p.piloto ? '<small> (piloto)</small>' : ''}</td><td>${P.r[p.i] || '–'}</td><td>${p.clave}</td><td class="ajusta">${h(p.eje)}</td><td class="num">${pct(p.acierto)}</td></tr>`).join('')}</tbody></table></div>
         </section>
         <button class="btn" data-accion="ver-hoja" data-a="${h(P.e.id)}">Ver o corregir su hoja</button>
-        <button class="btn" data-accion="informe-estudiante">${ICONO.bajar} Ficha PDF para el estudiante y su apoderado</button>
+        ${seccionInformeEstudiante(P.e, cur)}
       </div></div>`;
+  }
+
+  // Ensayos que rindió un estudiante en el curso activo, del más reciente al más antiguo
+  function ensayosDelEstudiante(idEst, cur) {
+    return ensayosConHojas(cur).filter((e) => hojasDe(e, cur)[idEst]).map((e) => {
+      const x = Estad.analizar(e, cur, hojasDe(e, cur)).estudiantes.find((y) => y.e.id === idEst);
+      return { e, x };
+    }).filter((o) => o.x && o.x.corregida);
+  }
+  // En el perfil: elegir ensayos y versión, y descargar el informe del estudiante
+  function seccionInformeEstudiante(est, cur) {
+    const suyos = ensayosDelEstudiante(est.id, cur);
+    if (!E.fichaSel || E.fichaSel.id !== est.id) E.fichaSel = { id: est.id, marcados: suyos.map((o) => o.e.id), modo: 'familia' };
+    const S = E.fichaSel, n = S.marcados.filter((id) => suyos.some((o) => o.e.id === id)).length;
+    return `<section class="tarjeta pad informe-estudiante"><span class="etiqueta">Informe PDF de ${h(corto(est.nombre))}</span>
+      <span class="nota">Marca los ensayos que quieres incluir. Con más de uno, el informe parte con un resumen de todos y sigue con el detalle de cada ensayo.</span>
+      <div class="filtros"><button data-accion="marcar-perfil" data-a="todos">Todos</button>${[...new Set(suyos.map((o) => Estad.grupoEnsayo(o.e)))].length > 1 ? `<button data-accion="marcar-perfil" data-a="asig">Solo ${h(Estad.grupoEnsayo(ensayoActivo()))}</button>` : ''}<button data-accion="marcar-perfil" data-a="ninguno">Ninguno</button></div>
+      <div class="lista-elegir">${suyos.map(({ e, x }) => {
+        const on = S.marcados.includes(e.id);
+        return `<button class="opcion" data-accion="marcar-perfil" data-a="${h(e.id)}" aria-pressed="${on}"><span class="caja">${on ? ICONO.check : ''}</span>
+          <span class="principal"><b>${h(e.nombre)}</b><span>${h([e.asignatura, e.fecha].filter(Boolean).join(' · '))}</span></span>
+          <span class="resultado num"><b>${pct(x.logro)}</b><span>nota ${notaTx(x.nota)}</span></span></button>`;
+      }).join('')}</div>
+      <span class="etiqueta">¿Para quién es?</span>
+      <div class="segmento"><button data-accion="modo-perfil" data-a="familia" aria-pressed="${S.modo === 'familia'}">Estudiante y apoderado</button><button data-accion="modo-perfil" data-a="docente" aria-pressed="${S.modo === 'docente'}">Docente</button></div>
+      <span class="nota">${S.modo === 'familia' ? 'Sin lugar en el curso ni análisis técnico; incluye qué estudiar.' : 'Incluye lugar en el curso, percentil y análisis técnico.'}</span>
+      <button class="btn primario" data-accion="informe-perfil" ${n ? '' : 'disabled'}>${ICONO.bajar} Descargar informe (${n} ensayo${n === 1 ? '' : 's'})</button>
+    </section>`;
+  }
+  async function descargarInformeEstudiante() {
+    const S = E.fichaSel, cur = cursoActivo();
+    const elegidos = ensayosDelEstudiante(S.id, cur).map((o) => o.e).filter((e) => S.marcados.includes(e.id))
+      .sort((a, b) => Estad.fechaOrden(a).localeCompare(Estad.fechaOrden(b)));
+    if (!elegidos.length) return;
+    toast('Preparando el informe…');
+    try {
+      const ultimo = elegidos[elegidos.length - 1];
+      const base = contextoInforme(ultimo, elegidos.map((e) => e.id));
+      const porEnsayo = elegidos.map((e) => (e.id === ultimo.id ? base : contextoInforme(e, [e.id])));
+      const blob = Informe.estudiante(base, porEnsayo, S.id, S.modo);
+      const est = cur.estudiantes.find((e) => e.id === S.id);
+      const sufijo = elegidos.length === 1 ? Almacen.id(ultimo.nombre).slice(0, 30) : `${elegidos.length}_ensayos`;
+      await descargar(`informe_${S.modo === 'familia' ? 'apoderado' : 'docente'}_${Almacen.id(est.nombre)}_${sufijo}.pdf`, blob);
+    } catch (e) { console.error(e); toast('No se pudo crear el informe: ' + e.message); }
   }
 
   // Tablero del colegio: cada nivel y asignatura con resultados
@@ -1404,6 +1448,16 @@
     'informe-curso': () => elegirEnsayos('curso'),
     'informe-estudiantes': () => elegirEnsayos('estudiantes'),
     'informe-estudiante': () => elegirEnsayos('estudiantes', [E.estAbierto]),
+    'marcar-perfil': (a) => {
+      const S = E.fichaSel, suyos = ensayosDelEstudiante(S.id, cursoActivo()).map((o) => o.e);
+      if (a === 'todos') S.marcados = suyos.map((e) => e.id);
+      else if (a === 'ninguno') S.marcados = [];
+      else if (a === 'asig') S.marcados = suyos.filter((e) => Estad.grupoEnsayo(e) === Estad.grupoEnsayo(ensayoActivo())).map((e) => e.id);
+      else S.marcados = S.marcados.includes(a) ? S.marcados.filter((x) => x !== a) : [...S.marcados, a];
+      E.mantenerScroll = true; render();
+    },
+    'modo-perfil': (a) => { E.fichaSel.modo = a; E.mantenerScroll = true; render(); },
+    'informe-perfil': () => descargarInformeEstudiante(),
     'marcar-ensayo': (a) => { const m = E.elegirInforme.marcados; E.elegirInforme.marcados = m.includes(a) ? m.filter((x) => x !== a) : [...m, a]; E.mantenerScroll = true; render(); },
     'marcar-grupo': (a) => {
       const act = ensayoActivo(), lista = ensayosConHojas(cursoActivo());

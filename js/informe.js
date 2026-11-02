@@ -271,62 +271,143 @@ const Informe = (() => {
     return null;
   }
 
+  // Cifras con un decimal, sin ",0"
+  const dec = (v) => (Math.round(v * 10) / 10).toFixed(1).replace('.', ',').replace(/,0$/, '');
+  const numeros = (ps) => lista(ps.map((p) => String(p.n ?? p)));
+  const validasDe = (A) => A.preguntas.filter((p) => !p.piloto);
+
+  // Correctas que se necesitan para llegar a la nota de aprobación
+  function correctasAprobar(A) {
+    const ap = Estad.conf.escala.aprobacion;
+    let c = 0;
+    while (c < A.n && Estad.nota(c / A.n) < ap - 1e-9) c++;
+    return c;
+  }
+
+  // ¿Las preguntas más difíciles se concentran en un eje?
+  function dificilesPorEje(A) {
+    const val = validasDe(A).filter((p) => p.eje);
+    if (val.length < 10) return null;
+    const k = Math.max(4, Math.min(6, Math.round(val.length / 5)));
+    const peores = val.slice().sort((a, b) => a.acierto - b.acierto).slice(0, k);
+    const cuenta = new Map();
+    peores.forEach((p) => cuenta.set(p.eje, (cuenta.get(p.eje) || 0) + 1));
+    const [eje, n] = [...cuenta].sort((a, b) => b[1] - a[1])[0];
+    const peso = val.filter((p) => p.eje === eje).length / val.length;
+    const concentra = n >= Math.ceil(k / 2) && n / k >= peso + 0.15;
+    return { peores, k, eje: concentra ? eje : null, n, nums: peores.filter((p) => p.eje === eje).map((p) => p.n).sort((a, b) => a - b) };
+  }
+
+  // Preguntas donde una misma alternativa incorrecta reunió a buena parte del curso
+  function erroresCompartidos(A) {
+    return validasDe(A).filter((p) => p.distractor && p.distractor.n >= 3 && p.distractor.n / (p.total || 1) >= 0.3)
+      .sort((a, b) => b.distractor.n / b.total - a.distractor.n / a.total).slice(0, 3);
+  }
+
+  // Respuestas en blanco: cuántas y cuántas en el último cuarto de la prueba
+  function blancos(A, xs) {
+    const val = validasDe(A), corte = Math.floor(val.length * 0.75);
+    let total = 0, final = 0;
+    xs.forEach((x) => val.forEach((p, j) => { if (!x.r[p.i]) { total++; if (j >= corte) final++; } }));
+    return { total, final, alFinal: total >= 4 && final / total >= 0.5 };
+  }
+
   function lineasPrincipales(ctx) {
-    const { ens, cur, A, H, AL, N } = ctx, R = A.resumen, esc = Estad.conf.escala;
-    const out = [];
-    if (R.corregidas < MIN_N) out.push(`Atención: hay solo ${plural(R.corregidas, 'hoja corregida', 'hojas corregidas')}. Con tan pocos datos los resultados son referenciales, y se omiten la nube de puntos, los percentiles y el análisis técnico de las preguntas.`);
-    const conv = conversion(ens, R);
-    out.push(`Se corrigieron ${R.corregidas} de ${R.total} hojas. En promedio, el curso respondió bien el ${pct(R.media)} de las preguntas, lo que equivale a una nota ${nt(R.notaMedia)}${conv ? ' y ' + conv : ''}.`);
-    out.push(R.aprobados === 0 ? `Ninguno de los ${R.corregidas} estudiantes alcanzó nota ${nt(esc.aprobacion)}, con una exigencia de ${pct(esc.exigencia)}.` : `${R.aprobados} de ${R.corregidas} estudiantes (${pct(R.aprobados / R.corregidas)}) obtuvo nota ${nt(esc.aprobacion)} o superior, con una exigencia de ${pct(esc.exigencia)}.`);
+    const { ens, A, H, AL, N } = ctx, R = A.resumen, esc = Estad.conf.escala;
+    const pocos = R.corregidas < MIN_N, out = [];
+    if (pocos) out.push(`Hay solo ${plural(R.corregidas, 'hoja corregida', 'hojas corregidas')}. Las cifras sirven de referencia, pero no alcanzan para la nube de puntos, los percentiles ni el análisis técnico de las preguntas.`);
+    // Resultado global y dispersión
+    const correctasMedia = Estad.media(A.hechas.map((x) => x.correctas));
+    let t = `En promedio, el curso contestó bien ${dec(correctasMedia)} de ${A.n} preguntas (${pct(R.media)}), lo que da nota ${nt(R.notaMedia)}${R.puntajeMedia != null ? ` y unos ${R.puntajeMedia} puntos PAES` : ''}.`;
+    if (!pocos) {
+      t += ` La mitad central del curso quedó entre ${pct(R.q1)} y ${pct(R.q3)}; el resultado más bajo fue ${pct(R.min)} y el más alto, ${pct(R.max)}.`;
+      if (R.desviacion >= 0.18) t += ' Son diferencias grandes para un mismo curso, así que el trabajo por grupos rinde más que una clase única de repaso.';
+      else if (R.desviacion <= 0.1) t += ' Es un curso bastante parejo.';
+    }
+    out.push(t);
+    // Aprobación y estudiantes cerca del 4,0
+    const cAp = correctasAprobar(A);
+    const noAprueban = A.hechas.filter((x) => x.nota < esc.aprobacion - 1e-9);
+    const cerca = noAprueban.filter((x) => cAp - x.correctas <= 3).sort((a, b) => b.correctas - a.correctas);
+    t = R.aprobados === 0 ? `Nadie llegó al ${nt(esc.aprobacion)}, que con exigencia de ${pct(esc.exigencia)} pide ${cAp} correctas de ${A.n}.`
+      : `Aprueban ${R.aprobados} de ${R.corregidas} (${pct(R.aprobados / R.corregidas)}). El ${nt(esc.aprobacion)} pide ${cAp} correctas de ${A.n}.`;
+    if (cerca.length && noAprueban.length) t += ` De los ${noAprueban.length} que no llegan, ${cerca.length === noAprueban.length ? (cerca.length === 1 ? 'el único está' : 'todos están') : cerca.length === 1 ? 'uno está' : cerca.length + ' están'} a tres respuestas o menos: ${lista(cerca.slice(0, 6).map((x) => nombreCorto(x.e.nombre)))}${cerca.length > 6 ? ' y otros' : ''}.`;
+    out.push(t);
     const meta = metaDe(ctx);
     if (meta) {
       const d = meta.actual - meta.valor;
-      out.push(Math.abs(d) < meta.tolerancia ? `El curso alcanzó la meta del colegio (${meta.texto(meta.valor)}).`
-        : d > 0 ? `El curso superó la meta del colegio: ${meta.texto(meta.actual)} frente a ${meta.texto(meta.valor)}.`
-          : `El curso está bajo la meta del colegio: ${meta.texto(meta.actual)} frente a ${meta.texto(meta.valor)}. ${plural(meta.cumplen, 'estudiante ya la alcanza', 'estudiantes ya la alcanzan')}.`);
+      out.push(Math.abs(d) < meta.tolerancia ? `El curso está en la meta del colegio (${meta.texto(meta.valor)}).`
+        : d > 0 ? `El curso supera la meta del colegio: ${meta.texto(meta.actual)}, con la meta en ${meta.texto(meta.valor)}.`
+          : `El curso está bajo la meta del colegio (${meta.texto(meta.actual)}, con la meta en ${meta.texto(meta.valor)}); ${meta.cumplen === 0 ? 'ningún estudiante la alcanza todavía' : `${plural(meta.cumplen, 'estudiante la alcanza', 'estudiantes la alcanzan')}`}.`);
     }
     if (A.estandares) {
-      const [ins, ele, ade] = A.estandares.map((s) => s.n / R.corregidas);
-      out.push(`Según los cortes del ensayo, el ${pct(ade)} del curso quedaría en el nivel Adecuado, el ${pct(ele)} en Elemental y el ${pct(ins)} en Insuficiente.`);
+      const [ins, ele, ade] = A.estandares;
+      out.push(`Con los cortes del ensayo, ${ade.n} quedarían en Adecuado, ${ele.n} en Elemental y ${ins.n} en Insuficiente (${pct(ade.n / R.corregidas)}, ${pct(ele.n / R.corregidas)} y ${pct(ins.n / R.corregidas)}).`);
     }
+    // Ejes y preguntas difíciles
     const ejes = A.porEje.filter((g) => g.nombre !== 'Sin dato').slice().sort((a, b) => b.logro - a.logro);
+    const dif = dificilesPorEje(A);
     if (ejes.length >= 2) {
       const a = ejes[0], b = ejes[ejes.length - 1];
-      out.push(`El eje con mejor resultado fue ${a.nombre} (${pct(a.logro)}) y el más descendido, ${b.nombre} (${pct(b.logro)}): hay ${pts(a.logro - b.logro)} de diferencia entre ambos.`);
+      t = a.logro - b.logro < 0.08 ? `Los ejes quedaron parejos: de ${pct(b.logro)} en ${b.nombre} a ${pct(a.logro)} en ${a.nombre}.`
+        : `Por eje, ${a.nombre} fue lo mejor resuelto (${pct(a.logro)}) y ${b.nombre} lo más bajo (${pct(b.logro)}).`;
+      if (dif && dif.eje) t += ` De las ${dif.k} preguntas con menos aciertos, ${dif.n} son de ${dif.eje} (${numeros(dif.nums)}).`;
+      out.push(t);
+    }
+    if (dif && !dif.eje) out.push(`Las preguntas con menos aciertos fueron ${lista(dif.peores.slice(0, 3).map((p) => `la ${p.n} (${pct(p.acierto)})`))}, de ejes distintos.`);
+    // Errores que se repiten
+    const comp = pocos ? [] : erroresCompartidos(A);
+    if (comp.length) out.push(`Hay errores que se repiten: ${comp.map((p) => `en la ${p.n}, ${p.distractor.n} de ${p.total} marcaron la ${p.distractor.letra} (la correcta era la ${p.clave})`).join('; ')}. Cuando tantos eligen la misma alternativa, no es azar: hay un razonamiento equivocado en común que vale la pena discutir en clases.`);
+    // Respuestas en blanco
+    if (R.omision >= 0.04) {
+      const b = blancos(A, A.hechas);
+      out.push(b.alFinal ? `Quedaron ${b.total} respuestas en blanco en todo el curso y ${b.final} están en el último cuarto de la prueba: a varios no les alcanzó el tiempo.`
+        : `En promedio quedó en blanco el ${pct(R.omision)} de las preguntas, repartidas a lo largo de la prueba.`);
+    }
+    // Comparaciones
+    const comp2 = [];
+    const idx = H ? H.puntos.findIndex((p) => p.ensayo.id === ens.id) : -1;
+    if (idx > 0) {
+      const ant = H.puntos[idx - 1], d = R.media - ant.media;
+      comp2.push(Math.abs(d) < 0.02 ? `frente a ${ant.ensayo.nombre} el resultado se mantuvo (${pct(ant.media)})` : `frente a ${ant.ensayo.nombre} ${d > 0 ? 'subió' : 'bajó'} ${pts(d)} (venía de ${pct(ant.media)})`);
     }
     if (N && N.porCurso.length >= 2) {
       const d = R.media - N.A.resumen.media;
-      out.push(Math.abs(d) < 0.02 ? `El curso quedó en línea con el promedio de ${ctx.nivel} (${pct(N.A.resumen.media)}).`
-        : `El curso quedó ${pts(d)} ${d > 0 ? 'sobre' : 'bajo'} el promedio de ${ctx.nivel} (${pct(N.A.resumen.media)}).`);
+      comp2.push(Math.abs(d) < 0.02 ? `está en el promedio de ${ctx.nivel} (${pct(N.A.resumen.media)})` : `quedó ${pts(d)} ${d > 0 ? 'sobre' : 'bajo'} el promedio de ${ctx.nivel} (${pct(N.A.resumen.media)})`);
     }
-    const idx = H ? H.puntos.findIndex((p) => p.ensayo.id === ens.id) : -1;
-    if (idx > 0) {
-      const d = R.media - H.puntos[idx - 1].media;
-      out.push(Math.abs(d) < 0.02 ? `Respecto del ensayo anterior, ${H.puntos[idx - 1].ensayo.nombre}, el resultado se mantuvo.`
-        : `Respecto del ensayo anterior, ${H.puntos[idx - 1].ensayo.nombre}, el curso ${d > 0 ? 'subió' : 'bajó'} ${pts(d)}.`);
-    }
+    if (comp2.length) out.push(mayus(lista(comp2)) + '.');
     const riesgo = AL.filter((a) => a.alertas.some((x) => x.id === 'riesgo')).length;
     const conAlerta = AL.filter((a) => a.alertas.length).length;
-    if (conAlerta) out.push(`${plural(conAlerta, 'estudiante necesita', 'estudiantes necesitan')} atención${riesgo ? `; ${riesgo === 1 ? 'uno está' : riesgo + ' están'} en riesgo` : ''}. El detalle está en la sección "Estudiantes que requieren apoyo".`);
+    if (conAlerta) out.push(`${plural(conAlerta, 'estudiante tiene', 'estudiantes tienen')} alguna alerta${riesgo ? ` y ${riesgo === 1 ? 'uno está' : riesgo + ' están'} en riesgo` : ''}; los nombres están en "Estudiantes que requieren apoyo".`);
     const sel = ctx.seleccion || [];
-    if (sel.length > 1) out.push(`Este informe incluye ${sel.length} ensayos (${lista(sel.map((x) => x.ens.nombre))}). El análisis detallado corresponde a ${ens.nombre}; los demás aparecen en la evolución y en la ficha de cada estudiante.`);
-    if (A.pilotos) out.push(`El análisis considera ${A.n} preguntas: las ${A.pilotos} preguntas piloto no cuentan para el logro, la nota ni el puntaje.`);
+    if (sel.length > 1) out.push(`El informe incluye ${sel.length} ensayos (${lista(sel.map((x) => x.ens.nombre))}). El análisis detallado es de ${ens.nombre}; los demás aparecen en la evolución y en la ficha de cada estudiante.`);
+    if (A.pilotos) out.push(`Se consideran ${A.n} preguntas: ${A.pilotos === 1 ? 'la pregunta piloto no cuenta' : `las ${A.pilotos} preguntas piloto no cuentan`} para el logro, la nota ni el puntaje.`);
     return out;
   }
 
   function sugerencias(ctx) {
-    const { A, G } = ctx;
+    const { A, G, ens } = ctx, R = A.resumen;
     const out = [];
     const ejes = A.porEje.filter((g) => g.nombre !== 'Sin dato').slice().sort((a, b) => a.logro - b.logro);
-    if (ejes.length && ejes[0].logro < 0.6) out.push(`Dar prioridad a ${ejes[0].nombre} en las próximas clases: es el eje con menor logro (${pct(ejes[0].logro)}).`);
+    if (ejes.length && ejes[0].logro < 0.6) {
+      const e = ejes[0], te = Temarios.eje(ens.asignatura, e.nombre);
+      const peores = validasDe(A).filter((p) => p.eje === e.nombre).sort((a, b) => a.acierto - b.acierto).slice(0, 3).map((p) => p.n).sort((a, b) => a - b);
+      out.push(`Retomar ${e.nombre} (${pct(e.logro)})${te ? `, partiendo por ${lista(te.contenidos.slice(0, 2).map(minus))}` : ''}. Las preguntas ${numeros(peores)} sirven como ejemplos para la clase.`);
+    }
     const habs = A.porHabilidad.filter((g) => g.nombre !== 'Sin dato').slice().sort((a, b) => a.logro - b.logro);
-    if (habs.length && habs[0].logro < 0.6) out.push(`Incluir actividades que pidan ${habs[0].nombre.toLowerCase()}, la habilidad más débil del curso (${pct(habs[0].logro)}).`);
-    const dificiles = A.preguntas.filter((p) => !p.piloto && p.distractor && p.distractor.n >= 3 && p.distractor.n / (p.total || 1) >= 0.3).sort((a, b) => a.acierto - b.acierto).slice(0, 3);
-    if (dificiles.length) out.push(`Revisar en clases ${dificiles.length === 1 ? 'la pregunta' : 'las preguntas'} ${lista(dificiles.map((p) => String(p.n)))}: muchos estudiantes eligieron la misma alternativa incorrecta, lo que suele indicar un error de concepto compartido.`);
-    if (G.length) out.push(`Formar ${G.length === 1 ? 'un grupo' : G.length + ' grupos'} de reforzamiento: ${lista(G.slice(0, 3).map((g) => `${g.nombre} (${plural(g.estudiantes.length, 'estudiante', 'estudiantes')})`))}.`);
-    const omision = A.resumen.omision;
-    if (omision > 0.1) out.push(`Conversar sobre la estrategia frente a la prueba: en promedio se dejó en blanco el ${pct(omision)} de las preguntas.`);
-    if (!out.length) out.push('Mantener el trabajo actual: el curso no muestra un eje ni una habilidad especialmente descendidos.');
+    if (habs.length && habs[0].logro < 0.6) {
+      const th = Temarios.habilidad(ens.asignatura, habs[0].nombre);
+      out.push(`Dar más espacio a ${minus(habs[0].nombre)} (${pct(habs[0].logro)})${th ? `: ejercicios donde haya que ${th.descripcion}` : ''}.`);
+    }
+    const comp = R.corregidas >= MIN_N ? erroresCompartidos(A) : [];
+    if (comp.length) out.push(`Corregir en voz alta ${comp.length === 1 ? 'la pregunta' : 'las preguntas'} ${numeros(comp)}: que quienes marcaron ${comp.length === 1 ? `la ${comp[0].distractor.letra}` : 'la alternativa más elegida'} expliquen su razonamiento y el curso encuentre dónde falla.`);
+    const cAp = correctasAprobar(A), esc = Estad.conf.escala;
+    const cerca = A.hechas.filter((x) => x.nota < esc.aprobacion - 1e-9 && cAp - x.correctas <= 3);
+    if (cerca.length >= 2) out.push(`Reforzamiento corto para ${plural(cerca.length, 'estudiante', 'los estudiantes')} que ${cerca.length === 1 ? 'está' : 'están'} a tres respuestas o menos del ${nt(esc.aprobacion)}: con poco trabajo cambia la tasa de aprobación.`);
+    if (G.length) out.push(`Armar ${G.length === 1 ? 'un grupo' : G.length + ' grupos'} de trabajo según el eje más débil de cada estudiante: ${lista(G.slice(0, 3).map((g) => `${g.nombre} (${plural(g.estudiantes.length, 'estudiante', 'estudiantes')})`))}.`);
+    if (R.omision > 0.08) out.push(blancos(A, A.hechas).alFinal ? 'Practicar ensayos con tiempo controlado: buena parte de las respuestas en blanco está al final de la prueba.'
+      : `Recordar que una respuesta en blanco no suma: se dejó sin responder el ${pct(R.omision)} de las preguntas.`);
+    if (!out.length) out.push('Seguir con la planificación actual y subir la dificultad: no hay un eje ni una habilidad claramente descendidos.');
     return out;
   }
 
@@ -912,6 +993,16 @@ const Informe = (() => {
         const d = ejes[ejes.length - 1], te = Temarios.eje(u.it.ens.asignatura, d.nombre);
         t += ` Su fuerte es ${ejes[0].nombre} (${pct(ejes[0].propio)}) ${d.propio >= 0.75 ? 'y su resultado más bajo, igualmente bueno, es' : 'y lo que más conviene reforzar es'} ${d.nombre} (${pct(d.propio)})${te && d.propio < 0.6 ? `: ${lista(te.contenidos.slice(0, 3).map(minus))}` : ''}.`;
       }
+      // Ejes que se repiten como fuertes o débiles en todos los ensayos rendidos de la asignatura
+      if (r.length >= 2) {
+        const perfiles = r.map((o) => Estad.perfil(o.it.A, x.e.id, null)).filter(Boolean);
+        const nombres = [...new Set(perfiles.flatMap((pf) => pf.porEje.map((e) => e.nombre)))].filter((n) => n !== 'Sin dato');
+        const valores = (n) => perfiles.map((pf) => (pf.porEje.find((e) => e.nombre === n) || {}).propio).filter((v) => v != null);
+        const siempreBajo = nombres.filter((n) => { const v = valores(n); return v.length >= 2 && v.every((z) => z < 0.5); });
+        const siempreAlto = nombres.filter((n) => { const v = valores(n); return v.length >= 2 && v.every((z) => z >= 0.7); });
+        if (siempreBajo.length) t += ` ${lista(siempreBajo)} ${siempreBajo.length === 1 ? 'quedó' : 'quedaron'} bajo 50% en los ${perfiles.length} ensayos: es lo que más se repite como pendiente.`;
+        if (siempreAlto.length) t += ` En ${lista(siempreAlto)} estuvo sobre 70% en todos.`;
+      }
       return t;
     });
     vinetas(P, items, { tam: 9.5 });
@@ -919,7 +1010,7 @@ const Informe = (() => {
 
   // ---------- Informe por estudiante ----------
   // modo 'docente': incluye lugar, percentil y análisis técnico. modo 'familia': para el estudiante y su apoderado, sin ranking.
-  function paginaEstudiante(P, ctx, x, modo = 'docente') {
+  function paginaEstudiante(P, ctx, x, modo = 'docente', { sinEvolucion = false } = {}) {
     const { ens, cur, A, H, N } = ctx;
     const familia = modo === 'familia', pocos = A.hechas.length < MIN_N;
     const conNivel = N && N.porCurso.length >= 2;
@@ -936,33 +1027,70 @@ const Informe = (() => {
     if (!familia && !pocos) t.push({ etiqueta: 'Lugar en el curso', valor: `${T.posicion}° de ${A.hechas.length}`, detalle: `percentil ${T.percentil}` });
     cifras(P, t);
 
-    // Resumen en palabras
+    // Resumen en palabras, con cifras concretas
+    const val = validasDe(A);
+    const cuentas = (grupos) => grupos.filter((g) => g.nombre !== 'Sin dato').map((g) => {
+      const idx = g.indices;
+      return { nombre: g.nombre, total: idx.length, bien: idx.filter((i) => x.aciertos[i]).length, curso: g.logro,
+        noLogradas: A.preguntas.filter((p) => idx.includes(p.i) && !x.aciertos[p.i]).map((p) => p.n) };
+    });
+    const porEje = new Map(cuentas(A.porEje).map((c) => [c.nombre, c])), porHab = new Map(cuentas(A.porHabilidad).map((c) => [c.nombre, c]));
+    const de = (c) => `${c.bien} de ${c.total}`;
     const d = x.logro - A.resumen.media;
     const frases = [];
-    frases.push(`${pila} respondió correctamente ${x.correctas} de ${A.n} preguntas (${pct(x.logro)}), lo que corresponde a nota ${nt(x.nota)}${x.puntaje != null ? ` y a un puntaje estimado de ${x.puntaje} puntos` : x.estandar ? `, en el nivel ${x.estandar.nombre} según los cortes del ensayo` : ''}.`);
-    frases.push(Math.abs(d) < 0.02 ? 'Su resultado está en línea con el promedio del curso.' : `Su resultado está ${pts(d)} ${d > 0 ? 'sobre' : 'bajo'} el promedio del curso.`);
+    frases.push(`${pila} contestó bien ${x.correctas} de ${A.n} preguntas (${pct(x.logro)}): nota ${nt(x.nota)}${x.puntaje != null ? ` y unos ${x.puntaje} puntos PAES` : x.estandar ? `, nivel ${x.estandar.nombre} según los cortes del ensayo` : ''}.`);
+    let comp = Math.abs(d) < 0.02 ? `Está en el promedio del curso (${pct(A.resumen.media)})` : `Son ${pts(d)} ${d > 0 ? 'sobre' : 'bajo'} el promedio del curso (${pct(A.resumen.media)})`;
+    if (!familia && !pocos) comp += ` y queda en el lugar ${T.posicion} de ${A.hechas.length}`;
     const serie = H ? (H.estudiantes.find((s) => s.e.id === x.e.id) || { serie: [] }).serie : [];
     const idx = H ? H.puntos.findIndex((p) => p.ensayo.id === ens.id) : -1;
     const previo = idx > 0 ? serie.slice(0, idx).filter((v) => v != null).pop() : null;
-    if (previo != null) { const c = x.logro - previo; frases.push(Math.abs(c) < 0.02 ? 'Mantuvo su resultado respecto del ensayo anterior.' : c > 0 ? `Mejoró ${pts(c)} respecto del ensayo anterior.` : `Bajó ${pts(c)} respecto del ensayo anterior.`); }
+    if (previo != null) { const c = x.logro - previo; comp += Math.abs(c) < 0.02 ? '; respecto del ensayo anterior, se mantuvo' : `; respecto del ensayo anterior, ${c > 0 ? 'subió' : 'bajó'} ${pts(c)}`; }
+    frases.push(comp + '.');
+    const fallas = A.n - x.correctas;
+    if (fallas > 0 && porEje.size >= 2) {
+      const reparto = [...porEje.values()].map((c) => ({ nombre: c.nombre, n: c.total - c.bien })).filter((c) => c.n).sort((a, b) => b.n - a.n);
+      const blanco = x.omitidas ? ` (${x.omitidas} en blanco)` : '';
+      if (reparto.length === 1) frases.push(fallas === 1 ? `La única que no logró${blanco} es de ${reparto[0].nombre}.` : `Las ${fallas} que no logró${blanco} son todas de ${reparto[0].nombre}.`);
+      else frases.push(`De las ${fallas} que no logró${blanco}, ${lista(reparto.map((c, i) => `${c.n} ${i === 0 ? `${c.n === 1 ? 'es' : 'son'} de ` : 'de '}${c.nombre}`))}.`);
+    }
+    const ap = Estad.conf.escala.aprobacion, faltanAp = x.nota < ap - 1e-9 ? correctasAprobar(A) - x.correctas : 0;
+    const metaTxt = T.meta ? T.meta.texto.replace(/^el /, 'al ').replace(/^(?!al )/, 'a ') : '';
+    if (T.meta && T.meta.faltan > 0) frases.push(`Con ${plural(T.meta.faltan, 'respuesta correcta', 'respuestas correctas')} más llegaría ${metaTxt}${faltanAp > 0 && !/^nota/.test(T.meta.texto) ? ` y con ${faltanAp} a la nota ${nt(ap)}` : ''}.`);
+    else if (faltanAp > 0) frases.push(`Con ${plural(faltanAp, 'respuesta correcta', 'respuestas correctas')} más llegaría a la nota ${nt(ap)}.`);
     const col = ctx.colegio || {};
-    if (x.puntaje != null && col.metaPuntaje) frases.push(x.puntaje >= col.metaPuntaje ? `Ya alcanza la meta del colegio de ${col.metaPuntaje} puntos.` : `La meta del colegio es ${col.metaPuntaje} puntos.`);
-    else if (col.metaLogro) frases.push(x.logro >= col.metaLogro ? `Ya alcanza la meta del colegio (${pct(col.metaLogro)} de logro).` : `La meta del colegio es ${pct(col.metaLogro)} de logro.`);
+    if (x.puntaje != null && col.metaPuntaje) frases.push(x.puntaje >= col.metaPuntaje ? `Ya está sobre la meta del colegio (${col.metaPuntaje} puntos).` : `La meta del colegio es ${col.metaPuntaje} puntos.`);
+    else if (col.metaLogro) frases.push(x.logro >= col.metaLogro ? `Ya está sobre la meta del colegio (${pct(col.metaLogro)} de logro).` : `La meta del colegio es ${pct(col.metaLogro)} de logro.`);
     parrafo(P, frases.join(' '), { tam: 10.5 });
 
-    // Lo que hace bien y lo que debe mejorar, en frases completas
-    const hab = (g) => { const th = Temarios.habilidad(ens.asignatura, g.nombre); return th ? th.descripcion : minus(g.nombre); };
+    // Lo que hace bien y lo que debe mejorar
+    const hab = (g) => { const th = Temarios.habilidad(ens.asignatura, g.nombre); return th ? th.descripcion : null; };
     const bueno = [], mejorar = [];
-    T.fortalezas.ejes.slice(0, 3).forEach((g, i) => bueno.push(`${i === 0 ? 'Le va muy bien en' : 'También rinde bien en'} ${g.nombre}: respondió bien el ${pct(g.propio)} de esas preguntas${g.dif >= 0.05 ? `, ${pts(g.dif)} más que el promedio del curso` : ''}.`));
-    T.fortalezas.habs.slice(0, 2).forEach((g) => bueno.push(`Muestra buen dominio al ${hab(g)} (habilidad ${minus(g.nombre)}, ${pct(g.propio)}).`));
-    if (T.aciertoDificiles.length) bueno.push(`Acertó ${plural(T.aciertoDificiles.length, 'una pregunta que la mayoría del curso falló', 'preguntas que la mayoría del curso falló')} (${lista(T.aciertoDificiles.slice(0, 6).map((p) => String(p.n)))}).`.replace('Acertó 1 una', 'Acertó una'));
-    if (x.omitidas === 0) bueno.push('Respondió todas las preguntas, sin dejar ninguna en blanco.');
-    if (!bueno.length) { const m = T.ejes.slice().sort((a, b) => b.propio - a.propio)[0]; bueno.push(m ? `Su mejor resultado fue en ${m.nombre} (${pct(m.propio)}), una buena base para seguir avanzando.` : 'Completó el ensayo, una base para seguir avanzando.'); }
-    T.debilidades.ejes.slice(0, 3).forEach((g, i) => mejorar.push(`${i === 0 ? 'Donde más conviene reforzar es' : 'También necesita practicar'} ${g.nombre}: logró ${pct(g.propio)}${g.dif <= -0.05 ? `, ${pts(g.dif)} bajo el promedio del curso` : ''}.`));
-    T.debilidades.habs.slice(0, 2).forEach((g) => mejorar.push(`Le cuesta ${hab(g)} (habilidad ${minus(g.nombre)}, ${pct(g.propio)}).`));
-    if (T.falloFaciles.length) mejorar.push(`Falló ${plural(T.falloFaciles.length, 'una pregunta que casi todo el curso respondió bien', 'preguntas que casi todo el curso respondió bien')} (${lista(T.falloFaciles.slice(0, 6).map((p) => String(p.n)))}): revisarlas con calma puede mostrar si fue un descuido.`.replace('Falló 1 una', 'Falló una'));
-    if (x.omitidas / A.n > 0.1) mejorar.push(`Dejó ${plural(x.omitidas, 'pregunta', 'preguntas')} en blanco: intentar responderlas puede subir su resultado.`);
-    if (!mejorar.length) mejorar.push('No tiene áreas descendidas. Su desafío es mantener el nivel y practicar con preguntas de mayor dificultad.');
+    T.fortalezas.ejes.slice(0, 3).forEach((g) => { const c = porEje.get(g.nombre); bueno.push(`${g.nombre}: ${de(c)} correctas (${pct(g.propio)})${g.dif >= 0.05 ? `; el curso logró ${pct(g.curso)}` : ''}.`); });
+    T.fortalezas.habs.slice(0, 2).forEach((g) => { const c = porHab.get(g.nombre), ds = hab(g); bueno.push(`Habilidad ${minus(g.nombre)}: ${de(c)}${ds ? `. Sabe ${ds}` : ''}.`); });
+    if (T.aciertoDificiles.length) bueno.push(`${T.aciertoDificiles.length === 1 ? 'Acertó la pregunta' : 'Acertó las preguntas'} ${numeros(T.aciertoDificiles.slice(0, 6))}, que menos del 40% del curso respondió bien.`);
+    if (x.omitidas === 0 && bueno.length < 4) bueno.push('No dejó preguntas en blanco.');
+    if (!bueno.length) {
+      const m = T.ejes.slice().sort((a, b) => b.propio - a.propio)[0];
+      bueno.push(m ? `Su mejor eje fue ${m.nombre}, con ${de(porEje.get(m.nombre))} correctas.` : `Contestó bien ${x.correctas} preguntas.`);
+    }
+    T.debilidades.ejes.slice(0, 3).forEach((g, i) => {
+      const c = porEje.get(g.nombre), parte = fallas ? (c.total - c.bien) / fallas : 0;
+      mejorar.push(`${g.nombre}: ${de(c)} correctas (${pct(g.propio)})${g.dif <= -0.05 ? `; el curso logró ${pct(g.curso)}` : ''}.${i === 0 && parte >= 0.4 && porEje.size >= 3 ? ` Aquí está ${parte >= 0.6 ? 'la mayor parte' : 'buena parte'} de sus errores.` : ''}`);
+    });
+    T.debilidades.habs.slice(0, 2).forEach((g) => { const c = porHab.get(g.nombre), ds = hab(g); mejorar.push(`Habilidad ${minus(g.nombre)}: ${de(c)}${ds ? `. Le cuesta ${ds}` : ''}.`); });
+    if (T.falloFaciles.length) mejorar.push(`${T.falloFaciles.length === 1 ? 'Falló la pregunta' : 'Falló las preguntas'} ${numeros(T.falloFaciles.slice(0, 6))}, que el 70% o más del curso contestó bien. ${familia ? (T.falloFaciles.length === 1 ? 'Conviene mirarla de nuevo: puede ser un descuido.' : 'Conviene mirarlas de nuevo: pueden ser descuidos.') : `Vale la pena revisar${T.falloFaciles.length === 1 ? 'la' : 'las'} con ${pila} para distinguir un descuido de un vacío puntual.`}`);
+    if (!familia && !pocos && T.conDistractor.length >= 3) mejorar.push(`En ${T.conDistractor.length} de sus errores marcó la misma alternativa equivocada que más eligió el curso (${T.conDistractor.length > 6 ? 'entre ellas, ' : ''}${numeros(T.conDistractor.slice(0, 6))}). Son confusiones compartidas: se corrigen mejor con todo el curso que en forma individual.`);
+    // ¿Rinde menos al final de la prueba?
+    if (val.length >= 12) {
+      const mitad = Math.floor(val.length / 2), corte = Math.floor(val.length * 0.75);
+      const l1 = val.slice(0, mitad).filter((p) => x.aciertos[p.i]).length / mitad;
+      const l2 = val.slice(mitad).filter((p) => x.aciertos[p.i]).length / (val.length - mitad);
+      const blancoFinal = val.slice(corte).filter((p) => !x.r[p.i]).length;
+      if (l1 - l2 >= 0.25) mejorar.push(`Rindió bastante mejor en la primera mitad de la prueba (${pct(l1)}) que en la segunda (${pct(l2)})${blancoFinal >= 2 ? `, y ${blancoFinal} de sus respuestas en blanco están en el último cuarto` : ''}. Puede que le haya faltado tiempo o que se haya cansado.`);
+      else if (blancoFinal >= 3 && blancoFinal >= x.omitidas * 0.6) mejorar.push(`${blancoFinal} de sus ${x.omitidas} respuestas en blanco están al final de la prueba: parece que no alcanzó a terminar.`);
+      else if (x.omitidas / A.n > 0.1) mejorar.push(`Dejó ${x.omitidas} preguntas en blanco. Una respuesta en blanco no suma: conviene responder todas.`);
+    } else if (x.omitidas / A.n > 0.1) mejorar.push(`Dejó ${x.omitidas} preguntas en blanco. Una respuesta en blanco no suma: conviene responder todas.`);
+    if (!mejorar.length) mejorar.push('No tiene ejes ni habilidades bajo lo esperado. El paso siguiente es practicar con preguntas más difíciles.');
     recuadros(P, [
       { titulo: 'Lo que hace bien', color: C.t3, fondo: '#EEF4FC', items: bueno },
       { titulo: familia ? 'Sus próximos desafíos' : 'Lo que debe mejorar', color: C.critico, fondo: '#FCF0E9', items: mejorar },
@@ -1004,8 +1132,7 @@ const Informe = (() => {
       const g = ejes[ejes.length - 1];
       areas.push(`Para seguir subiendo, su eje con más espacio de mejora es ${g.nombre} (${pct(g.propio)}). ${repasar(g)}`);
     }
-    T.debilidades.habs.slice(0, 2).forEach((g) => areas.push(`Practicar ejercicios que pidan ${hab(g)}.`));
-    if (T.meta && T.meta.faltan > 0) areas.push(`Meta próxima: con ${plural(T.meta.faltan, 'respuesta correcta', 'respuestas correctas')} más alcanzaría ${T.meta.texto}.`);
+    T.debilidades.habs.slice(0, 2).forEach((g) => areas.push(`Practicar ejercicios donde haya que ${hab(g) || minus(g.nombre)}.`));
     if (areas.length) { titulo(P, familia ? '¿Qué estudiar ahora?' : 'Áreas a reforzar', 2, 20); vinetas(P, areas, { tam: 10 }); }
 
     // Detalle de respuestas
@@ -1018,14 +1145,17 @@ const Informe = (() => {
       const tec = [];
       if (!pocos) tec.push(`Percentil ${T.percentil}: obtuvo un resultado mayor que el ${T.percentil}% del curso. Está a ${Math.abs(T.z).toFixed(1).replace('.', ',')} desviaciones estándar ${T.z >= 0 ? 'sobre' : 'bajo'} el promedio (${Math.abs(T.z) < 0.5 ? 'dentro del grupo central' : Math.abs(T.z) < 1 ? 'algo alejado del centro' : 'claramente alejado del centro'}).`);
       else tec.push(`Con ${A.hechas.length} hojas corregidas no se calculan percentil ni desviaciones: la comparación con el curso es solo referencial.`);
-      if (!pocos && T.erradas.length) tec.push(`De sus ${T.erradas.length} respuestas incorrectas, ${T.conDistractor.length} coinciden con el error más común del curso${T.conDistractor.length / T.erradas.length >= 0.5 ? ', lo que sugiere confusiones compartidas que se pueden trabajar en grupo' : ''}.`);
-      if (T.falloFaciles.length || T.aciertoDificiles.length) tec.push(`Consistencia: falló ${T.falloFaciles.length} pregunta${T.falloFaciles.length === 1 ? '' : 's'} fácil${T.falloFaciles.length === 1 ? '' : 'es'} y acertó ${T.aciertoDificiles.length} difícil${T.aciertoDificiles.length === 1 ? '' : 'es'}. ${T.falloFaciles.length > T.aciertoDificiles.length + 2 ? 'Un patrón así suele indicar falta de atención más que falta de conocimiento.' : T.aciertoDificiles.length > T.falloFaciles.length + 2 ? 'Muestra dominio por sobre su resultado global.' : 'Su patrón de respuestas es coherente con su nivel.'}`);
+      if (T.falloFaciles.length || T.aciertoDificiles.length) {
+        const f = T.falloFaciles.length, a = T.aciertoDificiles.length;
+        tec.push(`Consistencia: falló ${plural(f, 'pregunta fácil', 'preguntas fáciles')} y acertó ${plural(a, 'difícil', 'difíciles')}. ${f > a + 2 ? 'Los errores en preguntas fáciles le restan más de lo que suman sus aciertos difíciles; con más cuidado al responder, el resultado debería subir.' : a > f + 2 ? 'Resuelve preguntas difíciles con frecuencia: sabe más de lo que muestra su resultado global.' : 'Sus aciertos siguen el orden de dificultad de las preguntas.'}`);
+      }
+      if (!pocos && T.erradas.length && T.conDistractor.length < 3) tec.push(`De sus ${T.erradas.length} respuestas incorrectas, ${T.conDistractor.length} coinciden con el error más común del curso.`);
       if (T.contenidosFallados.length) tec.push(`Contenidos con más errores: ${lista(T.contenidosFallados.slice(0, 4).map((c) => `${c.contenido} (${c.n})`))}.`);
       vinetas(P, tec, { tam: 9.5 });
     }
 
     if ((ctx.seleccion || []).length > 1) ensayosEstudiante(P, ctx, x, pila);
-    else if (H && H.puntos.length >= 2 && serie.filter((v) => v != null).length >= 2) {
+    else if (!sinEvolucion && H && H.puntos.length >= 2 && serie.filter((v) => v != null).length >= 2) {
       titulo(P, 'Evolución', 3, 40);
       lineas(P, [{ nombre: pila, color: C.serie, valores: serie, grueso: true }, { nombre: 'Curso', color: C.gris, valores: H.puntos.map((p) => p.media), punteada: true }],
         H.puntos.map((p) => (p.ensayo.fecha ? p.ensayo.fecha.slice(0, 5) : p.ensayo.nombre.slice(0, 8))), { alto: 30 });
@@ -1054,5 +1184,45 @@ const Informe = (() => {
     return P.doc.output('blob');
   }
 
-  return { curso, estudiantes };
+  /**
+   * Informe de un estudiante con los ensayos elegidos.
+   * base: contexto con la selección completa (para el resumen). porEnsayo: un contexto por ensayo (para cada ficha).
+   */
+  function estudiante(base, porEnsayo, id, modo = 'familia') {
+    const P = nuevoDoc(base), familia = modo === 'familia';
+    const est = base.cur.estudiantes.find((e) => e.id === id);
+    const fichas = porEnsayo.map((c) => ({ c, x: c.A.hechas.find((y) => y.e.id === id) })).filter((f) => f.x);
+    if (!est || !fichas.length) throw new Error('El estudiante no tiene hojas corregidas en los ensayos elegidos');
+    const varios = fichas.length > 1;
+    P.pie = [(base.colegio || {}).nombre || 'Lector óptico', est.nombre, base.cur.nombre, varios ? `${fichas.length} ensayos` : fichas[0].c.ens.nombre].join(' · ');
+    if (varios) {
+      const pila = nombrePila(est.nombre);
+      banda(P, est.nombre, `${familia ? 'Informe para el estudiante y su apoderado' : 'Informe del estudiante para docentes'} · ${base.cur.nombre}`,
+        [`N° de lista ${est.lista}`, `${fichas.length} ensayos`, `generado el ${new Date().toLocaleDateString('es-CL')}`].join(' · '));
+      const logros = fichas.map((f) => ({ f, l: f.x.logro, d: f.x.logro - f.c.A.resumen.media }));
+      const mejor = logros.slice().sort((a, b) => b.d - a.d)[0], peor = logros.slice().sort((a, b) => a.d - b.d)[0];
+      const sobre = logros.filter((o) => o.d >= 0.02).length, bajo = logros.filter((o) => o.d <= -0.02).length;
+      cifras(P, [
+        { etiqueta: 'Ensayos', valor: String(fichas.length), detalle: lista([...new Set(fichas.map((f) => Estad.grupoEnsayo(f.c.ens)))]).slice(0, 40) },
+        { etiqueta: 'Logro promedio', valor: pct(Estad.media(logros.map((o) => o.l))), detalle: `curso: ${pct(Estad.media(fichas.map((f) => f.c.A.resumen.media)))}` },
+        { etiqueta: 'Sobre el curso', valor: `${sobre} de ${fichas.length}`, detalle: bajo ? `bajo el curso en ${bajo}` : 'en ningún ensayo bajo' },
+      ]);
+      const frases = [`${pila} rindió ${fichas.length} de los ensayos elegidos.`];
+      if (mejor.d - peor.d >= 0.05) frases.push(`Su mejor resultado, comparado con el curso, fue en ${mejor.f.c.ens.nombre} (${pct(mejor.l)}, ${pts(mejor.d)} ${mejor.d >= 0 ? 'sobre' : 'bajo'} el promedio) y el más bajo en ${peor.f.c.ens.nombre} (${pct(peor.l)}, ${pts(peor.d)} ${peor.d >= 0 ? 'sobre' : 'bajo'} el promedio).`);
+      else frases.push('Sus resultados frente al curso fueron parecidos en todos los ensayos.');
+      const faltan = (base.seleccion || []).filter((s) => !fichas.some((f) => f.c.ens.id === s.ens.id));
+      if (faltan.length) frases.push(`No rindió ${lista(faltan.map((s) => s.ens.nombre))}.`);
+      frases.push('Después de este resumen viene el detalle de cada ensayo.');
+      parrafo(P, frases.join(' '));
+      ensayosEstudiante(P, base, { e: est }, pila);
+    }
+    fichas.forEach((f, i) => {
+      if (i > 0 || varios) { P.doc.addPage(); P.y = M; }
+      paginaEstudiante(P, { ...f.c, seleccion: [] }, f.x, modo, { sinEvolucion: varios });
+    });
+    piePaginas(P);
+    return P.doc.output('blob');
+  }
+
+  return { curso, estudiantes, estudiante };
 })();

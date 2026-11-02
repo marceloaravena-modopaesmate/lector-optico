@@ -367,3 +367,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .lista-elegir .caja svg { width: 16px; height: 16px; }
 .lista-elegir .principal { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
 .lista-elegir .principal span { color: var(--texto-2); font-size: 13px; }
+
+.informe-estudiante { display: flex; flex-direction: column; gap: 10px; }
+.lista-elegir .resultado { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 15px; }
+.lista-elegir .resultado span { color: var(--texto-2); font-size: 12px; white-space: nowrap; }
