@@ -768,7 +768,7 @@ const Informe = (() => {
       titulo(P, 'Grupos de reforzamiento sugeridos', 3, 20);
       vinetas(P, G.map((g) => `${g.nombre}: ${lista(g.estudiantes.map((s) => nombreCorto(s.x.e.nombre)))}.`), { tam: 10 });
     }
-    titulo(P, 'Acciones sugeridas', 6, 30);
+    titulo(P, 'Acciones sugeridas', 6, 50);
     parrafo(P, 'Una propuesta para acordar en el departamento. El responsable y el plazo se pueden ajustar.', { color: C.texto2, tam: 9.5 });
     const plazos = ['Próximas 2 semanas', 'Próxima clase', 'Próximas 2 semanas', 'Este mes', 'Antes del próximo ensayo', 'Este mes'];
     const resp = (ctx.colegio && ctx.colegio.responsable) || 'Docente de la asignatura';
@@ -821,22 +821,60 @@ const Informe = (() => {
     });
     if (grupos.length > 1) frases.push('Cada línea es una asignatura; los ensayos de distintas asignaturas no son directamente comparables.');
     if (frases.length) parrafo(P, frases.join(' '), { color: C.texto2, tam: 10 });
-    // Ejes a lo largo de los ensayos de la asignatura principal
-    const g = grupos.find((x) => x.items.some((it) => it.ens.id === ctx.ens.id));
-    if (g && g.items.length >= 2) {
-      const ejes = [...new Set(g.items.flatMap((it) => it.A.porEje.filter((e) => e.nombre !== 'Sin dato').map((e) => e.nombre)))];
-      if (ejes.length) {
-        titulo(P, `Logro por eje en ${g.nombre}`, 4, 30);
+    // Un resumen por asignatura: último ensayo, ejes y evolución
+    grupos.forEach((g) => resumenAsignatura(P, ctx, g));
+  }
+
+  function resumenAsignatura(P, ctx, g) {
+    const u = g.items[g.items.length - 1], prev = g.items.length >= 2 ? g.items[g.items.length - 2] : null, R = u.A.resumen;
+    seccionChica(P, `Resumen de ${g.nombre}`, `${plural(g.items.length, 'ensayo', 'ensayos')} · último: ${u.ens.nombre}`);
+    const t = [
+      { etiqueta: 'Logro promedio', valor: pct(R.media), detalle: prev ? `antes: ${pct(prev.A.resumen.media)}` : `mediana ${pct(R.mediana)}` },
+      { etiqueta: 'Nota promedio', valor: nt(R.notaMedia), detalle: prev ? `antes: ${nt(prev.A.resumen.notaMedia)}` : '' },
+      { etiqueta: 'Aprueban', valor: pct(R.aprobados / (R.corregidas || 1)), detalle: `${R.aprobados} de ${R.corregidas}` },
+    ];
+    if (R.puntajeMedia != null) t.push({ etiqueta: 'Puntaje PAES (est.)', valor: R.puntajeMedia, detalle: prev && prev.A.resumen.puntajeMedia != null ? `antes: ${prev.A.resumen.puntajeMedia}` : `rango ${R.puntajeMin}–${R.puntajeMax}` });
+    else if (R.adecuado != null) t.push({ etiqueta: 'En Adecuado (est.)', valor: pct(R.adecuado), detalle: prev && prev.A.resumen.adecuado != null ? `antes: ${pct(prev.A.resumen.adecuado)}` : '' });
+    cifras(P, t);
+    const ejes = u.A.porEje.filter((e) => e.nombre !== 'Sin dato').slice().sort((a, b) => b.logro - a.logro);
+    const frases = [];
+    if (g.items.length >= 2) { const a = g.items[0]; frases.push(`Desde ${a.ens.nombre}, el logro promedio ${cambioTexto(R.media - a.A.resumen.media)}${prev && prev !== a ? `, y respecto del ensayo anterior ${cambioTexto(R.media - prev.A.resumen.media)}` : ''}.`); }
+    if (ejes.length >= 2) frases.push(`En el último ensayo, el eje más fuerte fue ${ejes[0].nombre} (${pct(ejes[0].logro)}) y el más débil, ${ejes[ejes.length - 1].nombre} (${pct(ejes[ejes.length - 1].logro)}).`);
+    const habs = u.A.porHabilidad.filter((e) => e.nombre !== 'Sin dato').slice().sort((a, b) => a.logro - b.logro);
+    if (habs.length >= 2) frases.push(`La habilidad que más cuesta es ${minus(habs[0].nombre)} (${pct(habs[0].logro)}).`);
+    const debil = ejes[ejes.length - 1], te = debil && Temarios.eje(u.ens.asignatura, debil.nombre);
+    if (te && debil.logro < 0.6) frases.push(`Para reforzar ${debil.nombre}: ${lista(te.contenidos.slice(0, 4).map(minus))}.`);
+    if (frases.length) parrafo(P, frases.join(' '), { tam: 10 });
+    if (ejes.length) {
+      const antes = prev ? new Map(prev.A.porEje.map((e) => [e.nombre, e.logro])) : null;
+      barras(P, ejes.map((e) => ({ nombre: e.nombre, valor: e.logro, ref: antes && antes.has(e.nombre) ? antes.get(e.nombre) : null, color: e.logro < 0.5 ? C.critico : C.serie })),
+        { refNombre: prev ? 'Raya negra: resultado en el ensayo anterior de esta asignatura' : '', alto: 5.8, gap: 3.6 });
+    }
+    if (g.items.length >= 2) {
+      const nombres = [...new Set(g.items.flatMap((it) => it.A.porEje.filter((e) => e.nombre !== 'Sin dato').map((e) => e.nombre)))];
+      if (nombres.length) {
         const ancho = Math.min(26, (W - 60) / g.items.length);
         tabla(P, [{ titulo: 'Eje', ancho: W - ancho * g.items.length - 22, envolver: true }, ...g.items.map((it) => ({ titulo: etiquetaEns(it.ens), ancho, der: true, negrita: false })), { titulo: 'Cambio', ancho: 22, der: true }],
-          ejes.map((nombre) => {
+          nombres.map((nombre) => {
             const v = g.items.map((it) => { const e = it.A.porEje.find((y) => y.nombre === nombre); return e ? e.logro : null; });
             const hay = v.filter((x) => x != null), d = hay.length >= 2 ? hay[hay.length - 1] - hay[0] : null;
             return { resaltar: d != null && d <= -0.05, celdas: [nombre, ...v.map((x) => (x == null ? '–' : pct(x))), d == null ? '–' : `${d > 0 ? '+' : ''}${Math.round(d * 100)}`] };
           }));
-        parrafo(P, 'La columna Cambio va del primer al último ensayo, en puntos de logro. Las filas destacadas bajaron 5 puntos o más.', { color: C.texto2, tam: 9 });
+        parrafo(P, 'Cambio: del primer al último ensayo de la asignatura, en puntos de logro. Las filas destacadas bajaron 5 puntos o más.', { color: C.texto2, tam: 9 });
       }
     }
+  }
+
+  // Encabezado de un bloque dentro de una sección
+  function seccionChica(P, texto, sub) {
+    P.cabe(70);
+    P.y += 5;
+    const { doc } = P;
+    doc.setFillColor(C.suave); doc.roundedRect(M, P.y, W, sub ? 12 : 8, 1.5, 1.5, 'F');
+    doc.setFillColor(C.azul); doc.rect(M, P.y, 1.6, sub ? 12 : 8, 'F');
+    fuente(doc, 11.5, 'bold', C.azul); doc.text(texto, M + 5, P.y + 5.5);
+    if (sub) { fuente(doc, 8.5, 'normal', C.texto2); doc.text(doc.splitTextToSize(sub, W - 8)[0], M + 5, P.y + 10); }
+    P.y += (sub ? 12 : 8) + 5;
   }
 
   // Ficha: los ensayos elegidos para un estudiante
@@ -860,6 +898,23 @@ const Informe = (() => {
       }).filter(Boolean);
       if (frases.length) parrafo(P, frases.join(' ') + (unGrupo ? ' La línea punteada es el promedio del curso.' : ''), { color: C.texto2, tam: 9.5 });
     }
+    // Resumen por asignatura con su último ensayo rendido
+    titulo(P, 'Resumen por asignatura', 4, 30);
+    const items = grupos.map((g) => {
+      const r = g.items.map((it) => ({ it, y: it.A.estudiantes.find((z) => z.e.id === x.e.id) })).filter((o) => o.y && o.y.corregida);
+      if (!r.length) return `${g.nombre}: no rindió los ensayos seleccionados.`;
+      const u = r[r.length - 1], A2 = u.it.A, y = u.y;
+      const P2 = Estad.perfil(A2, x.e.id, null);
+      const ejes = P2 ? P2.porEje.filter((e) => e.nombre !== 'Sin dato').slice().sort((a, b) => b.propio - a.propio) : [];
+      let t = `${g.nombre}: en ${u.it.ens.nombre} logró ${pct(y.logro)} (nota ${nt(y.nota)}${conversionDe(y) ? `, ${conversionDe(y)}` : ''}), ${Math.abs(y.logro - A2.resumen.media) < 0.02 ? 'igual que el promedio del curso' : `${pts(y.logro - A2.resumen.media)} ${y.logro > A2.resumen.media ? 'sobre' : 'bajo'} el promedio del curso`}.`;
+      if (r.length >= 2) t += ` Desde el primer ensayo ${cambioTexto(y.logro - r[0].y.logro)}.`;
+      if (ejes.length >= 2) {
+        const d = ejes[ejes.length - 1], te = Temarios.eje(u.it.ens.asignatura, d.nombre);
+        t += ` Su fuerte es ${ejes[0].nombre} (${pct(ejes[0].propio)}) ${d.propio >= 0.75 ? 'y su resultado más bajo, igualmente bueno, es' : 'y lo que más conviene reforzar es'} ${d.nombre} (${pct(d.propio)})${te && d.propio < 0.6 ? `: ${lista(te.contenidos.slice(0, 3).map(minus))}` : ''}.`;
+      }
+      return t;
+    });
+    vinetas(P, items, { tam: 9.5 });
   }
 
   // ---------- Informe por estudiante ----------
