@@ -216,7 +216,7 @@ const Informe = (() => {
       doc.setDrawColor(s.color); doc.setLineWidth(s.grueso ? 1 : 0.7);
       if (s.punteada) doc.setLineDashPattern([1.5, 1.2], 0);
       let prev = null;
-      s.valores.forEach((v, i) => { if (v == null) { prev = null; return; } if (prev) doc.line(x(prev[0]), y(prev[1]), x(i), y(v)); prev = [i, v]; });
+      s.valores.forEach((v, i) => { if (v == null) { if (!s.unir) prev = null; return; } if (prev) doc.line(x(prev[0]), y(prev[1]), x(i), y(v)); prev = [i, v]; });
       doc.setLineDashPattern([], 0);
       if (!s.punteada) s.valores.forEach((v, i) => { if (v != null) { doc.setFillColor(s.color); doc.circle(x(i), y(v), 1.1, 'F'); } });
       const u = s.valores.map((v, i) => [v, i]).filter(([v]) => v != null).pop();
@@ -241,13 +241,14 @@ const Informe = (() => {
     P.cabe(lh * 6); encabezado();
     const ll = 4.1;   // alto de cada línea extra en celdas que se envuelven
     filas.forEach((f, i) => {
-      const textos = cols.map((c, k) => { fuente(doc, 8.8, k === 1 ? 'bold' : 'normal'); const t = doc.splitTextToSize(String(f.celdas[k] == null ? '' : f.celdas[k]), c.ancho - 3); return c.envolver ? t : [t[0] || '']; });
+      const negrita = (c, k) => (c.negrita != null ? c.negrita : k === 1);
+      const textos = cols.map((c, k) => { fuente(doc, 8.8, negrita(c, k) ? 'bold' : 'normal'); const t = doc.splitTextToSize(String(f.celdas[k] == null ? '' : f.celdas[k]), c.ancho - 3); return c.envolver ? t : [t[0] || '']; });
       const alto = lh + (Math.max(...textos.map((t) => t.length)) - 1) * ll;
       if (!P.cabe(alto)) encabezado();
       if (f.resaltar) { doc.setFillColor('#FBE3D6'); doc.rect(M, P.y, W, alto, 'F'); } else if (i % 2) { doc.setFillColor('#F7F8FB'); doc.rect(M, P.y, W, alto, 'F'); }
       let x = M;
       cols.forEach((c, k) => {
-        fuente(doc, 8.8, k === 1 ? 'bold' : 'normal');
+        fuente(doc, 8.8, negrita(c, k) ? 'bold' : 'normal');
         textos[k].forEach((v, j) => doc.text(v, c.der ? x + c.ancho - 2 : x + 2, P.y + lh * 0.68 + j * ll, { align: c.der ? 'right' : 'left' }));
         x += c.ancho;
       });
@@ -307,6 +308,8 @@ const Informe = (() => {
     const riesgo = AL.filter((a) => a.alertas.some((x) => x.id === 'riesgo')).length;
     const conAlerta = AL.filter((a) => a.alertas.length).length;
     if (conAlerta) out.push(`${plural(conAlerta, 'estudiante necesita', 'estudiantes necesitan')} atención${riesgo ? `; ${riesgo === 1 ? 'uno está' : riesgo + ' están'} en riesgo` : ''}. El detalle está en la sección "Estudiantes que requieren apoyo".`);
+    const sel = ctx.seleccion || [];
+    if (sel.length > 1) out.push(`Este informe incluye ${sel.length} ensayos (${lista(sel.map((x) => x.ens.nombre))}). El análisis detallado corresponde a ${ens.nombre}; los demás aparecen en la evolución y en la ficha de cada estudiante.`);
     if (A.pilotos) out.push(`El análisis considera ${A.n} preguntas: las ${A.pilotos} preguntas piloto no cuentan para el logro, la nota ni el puntaje.`);
     return out;
   }
@@ -726,7 +729,8 @@ const Informe = (() => {
     }
 
     // 4. Paralelos y evolución
-    if (conNivel || (H && H.puntos.length >= 2)) seccion(P, 4, 'Paralelos y evolución', 60);
+    const sel = ctx.seleccion || [], conSel = sel.length > 1, conEvol = conSel || (H && H.puntos.length >= 2);
+    if (conNivel || conEvol) seccion(P, 4, 'Paralelos y evolución', 60);
     if (conNivel) {
       titulo(P, `Comparación con los paralelos de ${ctx.nivel}`, 0, 40);
       const filas = N.porCurso.map((x) => ({ nombre: x.curso.nombre, valor: x.A.resumen.media, color: C.cat[x.idx] || C.gris, destacado: x.curso.id === cur.id, ref: N.A.resumen.media }));
@@ -737,7 +741,8 @@ const Informe = (() => {
       if (N.brechas.length) t += ` Hay ${plural(N.brechas.length, 'pregunta', 'preguntas')} con 25 puntos o más de diferencia entre paralelos (${lista(N.brechas.slice(0, 4).map((p) => String(p.n)))}), lo que puede indicar contenidos que no se trabajaron igual en todos los cursos.`;
       parrafo(P, t, { color: C.texto2, tam: 10 });
     }
-    if (H && H.puntos.length >= 2) {
+    if (conSel) evolucionSeleccion(P, ctx);
+    else if (H && H.puntos.length >= 2) {
       titulo(P, 'Evolución en los ensayos', 6, 75);
       const et = H.puntos.map((p) => (p.ensayo.fecha ? p.ensayo.fecha.slice(0, 5) : p.ensayo.nombre.slice(0, 8)));
       const series = [{ nombre: cur.nombre, color: C.serie, valores: H.puntos.map((p) => p.media), grueso: true }];
@@ -751,7 +756,7 @@ const Informe = (() => {
     }
 
     // 5. Apoyo y sugerencias
-    seccion(P, conNivel || (H && H.puntos.length >= 2) ? 5 : 4, 'Apoyo y trabajo en clases', 50);
+    seccion(P, conNivel || conEvol ? 5 : 4, 'Apoyo y trabajo en clases', 50);
     const conAlerta = AL.filter((a) => a.alertas.length).sort((a, b) => b.gravedad - a.gravedad || a.x.logro - b.x.logro);
     titulo(P, 'Estudiantes que requieren apoyo', 0, 30);
     if (conAlerta.length) {
@@ -783,6 +788,78 @@ const Informe = (() => {
     })));
     if (sinHoja.length > 3) parrafo(P, `Sin hoja corregida (${sinHoja.length}): ${lista(sinHoja.map((x) => `${x.e.lista}. ${nombreCorto(x.e.nombre)}`))}.`, { tam: 9 });
     parrafo(P, `${pocos ? '' : 'El percentil indica qué porcentaje del curso obtuvo un resultado menor.'}${conPuntaje ? ' El puntaje se estima con la tabla de conversión del ensayo.' : conEst ? ' El estándar se estima con los cortes del ensayo.' : ''}`, { color: C.texto2, tam: 8.5 });
+  }
+
+  // ---------- Varios ensayos ----------
+  const etiquetaEns = (e) => (e.fecha ? e.fecha.slice(0, 5) : e.nombre.slice(0, 10));
+  const conversionDe = (x) => (x.puntaje != null ? `${x.puntaje} pts.` : x.estandar ? x.estandar.nombre : '');
+  // Agrupa los ensayos elegidos por asignatura, conservando el orden por fecha
+  function porAsignatura(sel) {
+    const g = new Map();
+    sel.forEach((s, i) => { const k = Estad.grupoEnsayo(s.ens); if (!g.has(k)) g.set(k, []); g.get(k).push({ ...s, i }); });
+    return [...g].map(([nombre, items]) => ({ nombre, items }));
+  }
+  const cambioTexto = (d) => (Math.abs(d) < 0.02 ? 'se mantuvo' : `${d > 0 ? 'subió' : 'bajó'} ${pts(d)}`);
+
+  function evolucionSeleccion(P, ctx) {
+    const { cur, A } = ctx, sel = ctx.seleccion, grupos = porAsignatura(sel);
+    titulo(P, 'Resultados en los ensayos seleccionados', 6, 50);
+    const conConv = sel.some((s) => s.A.resumen.puntajeMedia != null || s.A.resumen.adecuado != null);
+    const cols = [{ titulo: 'Ensayo', ancho: conConv ? 56 : 90, envolver: true, negrita: true }, { titulo: 'Fecha', ancho: 20, negrita: false }, { titulo: 'Hojas', ancho: 14, der: true }, { titulo: 'Logro', ancho: 16, der: true }, { titulo: 'Nota', ancho: 14, der: true }, { titulo: 'Aprueban', ancho: 20, der: true }];
+    if (conConv) cols.push({ titulo: 'Puntaje o Adecuado', ancho: W - 140, der: true });
+    tabla(P, cols, sel.map((s) => {
+      const R = s.A.resumen;
+      return { resaltar: false, celdas: [s.ens.nombre + (s.ens.id === ctx.ens.id ? ' (principal)' : ''), s.ens.fecha || '', R.corregidas, pct(R.media), nt(R.notaMedia), pct(R.aprobados / (R.corregidas || 1)),
+        ...(conConv ? [R.puntajeMedia != null ? `${R.puntajeMedia} pts.` : R.adecuado != null ? pct(R.adecuado) : '–'] : [])] };
+    }));
+    titulo(P, 'Evolución del logro promedio', 4, 70);
+    const series = grupos.map((g, k) => ({ nombre: grupos.length > 1 ? g.nombre : cur.nombre, color: C.cat[k] || C.gris, grueso: true, unir: true, valores: sel.map((_, i) => { const it = g.items.find((x) => x.i === i); return it ? it.A.resumen.media : null; }) }));
+    lineas(P, series, sel.map((s) => etiquetaEns(s.ens)));
+    const frases = grupos.filter((g) => g.items.length >= 2).map((g) => {
+      const a = g.items[0], b = g.items[g.items.length - 1];
+      return `En ${g.nombre}, entre ${a.ens.nombre} y ${b.ens.nombre} el logro promedio ${cambioTexto(b.A.resumen.media - a.A.resumen.media)} (de ${pct(a.A.resumen.media)} a ${pct(b.A.resumen.media)}).`;
+    });
+    if (grupos.length > 1) frases.push('Cada línea es una asignatura; los ensayos de distintas asignaturas no son directamente comparables.');
+    if (frases.length) parrafo(P, frases.join(' '), { color: C.texto2, tam: 10 });
+    // Ejes a lo largo de los ensayos de la asignatura principal
+    const g = grupos.find((x) => x.items.some((it) => it.ens.id === ctx.ens.id));
+    if (g && g.items.length >= 2) {
+      const ejes = [...new Set(g.items.flatMap((it) => it.A.porEje.filter((e) => e.nombre !== 'Sin dato').map((e) => e.nombre)))];
+      if (ejes.length) {
+        titulo(P, `Logro por eje en ${g.nombre}`, 4, 30);
+        const ancho = Math.min(26, (W - 60) / g.items.length);
+        tabla(P, [{ titulo: 'Eje', ancho: W - ancho * g.items.length - 22, envolver: true }, ...g.items.map((it) => ({ titulo: etiquetaEns(it.ens), ancho, der: true, negrita: false })), { titulo: 'Cambio', ancho: 22, der: true }],
+          ejes.map((nombre) => {
+            const v = g.items.map((it) => { const e = it.A.porEje.find((y) => y.nombre === nombre); return e ? e.logro : null; });
+            const hay = v.filter((x) => x != null), d = hay.length >= 2 ? hay[hay.length - 1] - hay[0] : null;
+            return { resaltar: d != null && d <= -0.05, celdas: [nombre, ...v.map((x) => (x == null ? '–' : pct(x))), d == null ? '–' : `${d > 0 ? '+' : ''}${Math.round(d * 100)}`] };
+          }));
+        parrafo(P, 'La columna Cambio va del primer al último ensayo, en puntos de logro. Las filas destacadas bajaron 5 puntos o más.', { color: C.texto2, tam: 9 });
+      }
+    }
+  }
+
+  // Ficha: los ensayos elegidos para un estudiante
+  function ensayosEstudiante(P, ctx, x, pila) {
+    const sel = ctx.seleccion, grupos = porAsignatura(sel);
+    const filas = sel.map((s) => ({ s, y: s.A.estudiantes.find((z) => z.e.id === x.e.id) }));
+    titulo(P, 'Sus resultados en los ensayos seleccionados', 4, 40);
+    tabla(P, [{ titulo: 'Ensayo', ancho: 70, envolver: true, negrita: true }, { titulo: 'Fecha', ancho: 20, negrita: false }, { titulo: 'Correctas', ancho: 20, der: true }, { titulo: 'Logro', ancho: 16, der: true }, { titulo: 'Nota', ancho: 14, der: true }, { titulo: 'Puntaje / nivel', ancho: 22, der: true }, { titulo: 'vs. curso', ancho: W - 162, der: true }],
+      filas.map(({ s, y }) => ({ celdas: y && y.corregida ? [s.ens.nombre, s.ens.fecha || '', `${y.correctas}/${s.A.n}`, pct(y.logro), nt(y.nota), conversionDe(y) || '–', `${y.logro - s.A.resumen.media >= 0 ? '+' : ''}${Math.round((y.logro - s.A.resumen.media) * 100)}`]
+        : [s.ens.nombre, s.ens.fecha || '', 'no rindió', '', '', '', ''] })));
+    const unGrupo = grupos.length === 1;
+    const series = grupos.map((g, k) => ({ nombre: unGrupo ? pila : g.nombre, color: C.cat[k] || C.gris, grueso: true, unir: true, valores: sel.map((_, i) => { const it = g.items.find((z) => z.i === i); const y = it && it.A.estudiantes.find((z) => z.e.id === x.e.id); return y && y.corregida ? y.logro : null; }) }));
+    if (unGrupo) series.push({ nombre: 'Curso', color: C.gris, punteada: true, unir: true, valores: sel.map((s) => s.A.resumen.media) });
+    if (series.some((sr) => sr.valores.filter((v) => v != null).length >= 2)) {
+      lineas(P, series, sel.map((s) => etiquetaEns(s.ens)), { alto: 32 });
+      const frases = grupos.map((g) => {
+        const r = g.items.map((it) => ({ it, y: it.A.estudiantes.find((z) => z.e.id === x.e.id) })).filter((o) => o.y && o.y.corregida);
+        if (r.length < 2) return null;
+        const a = r[0], b = r[r.length - 1];
+        return `En ${g.nombre}, ${pila} ${cambioTexto(b.y.logro - a.y.logro)} entre ${a.it.ens.nombre} y ${b.it.ens.nombre}.`;
+      }).filter(Boolean);
+      if (frases.length) parrafo(P, frases.join(' ') + (unGrupo ? ' La línea punteada es el promedio del curso.' : ''), { color: C.texto2, tam: 9.5 });
+    }
   }
 
   // ---------- Informe por estudiante ----------
@@ -892,7 +969,8 @@ const Informe = (() => {
       vinetas(P, tec, { tam: 9.5 });
     }
 
-    if (H && H.puntos.length >= 2 && serie.filter((v) => v != null).length >= 2) {
+    if ((ctx.seleccion || []).length > 1) ensayosEstudiante(P, ctx, x, pila);
+    else if (H && H.puntos.length >= 2 && serie.filter((v) => v != null).length >= 2) {
       titulo(P, 'Evolución', 3, 40);
       lineas(P, [{ nombre: pila, color: C.serie, valores: serie, grueso: true }, { nombre: 'Curso', color: C.gris, valores: H.puntos.map((p) => p.media), punteada: true }],
         H.puntos.map((p) => (p.ensayo.fecha ? p.ensayo.fecha.slice(0, 5) : p.ensayo.nombre.slice(0, 8))), { alto: 30 });

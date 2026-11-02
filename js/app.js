@@ -545,21 +545,58 @@
   function analisisNivel(ens, cur) {
     return Estad.nivel(ens, paralelosDe(cur), (c) => hojasDe(ens, c), nombreNivel(cur));
   }
-  // Todo lo que necesita un informe PDF del curso activo en el ensayo activo
-  function contextoInforme() {
-    const ens = ensayoActivo(), cur = cursoActivo();
+  // Todo lo que necesita un informe PDF del curso activo. ens es el ensayo principal; elegidos, los ids de los ensayos a incluir.
+  function contextoInforme(ens, elegidos) {
+    const cur = cursoActivo();
     const A = Estad.analizar(ens, cur, hojasDe(ens, cur));
     const H = historialDelCurso(ens, cur);
     const nv = nivelDe(cur).nivel;
     const N = nv ? analisisNivel(ens, cur) : null;
     const HN = N && N.porCurso.length >= 2 ? Estad.historialNivel(ensayos(), paralelosDe(cur), (e, c) => hojasDe(e, c), Estad.grupoEnsayo(ens), nv) : null;
-    return { ens, cur, A, H, AL: Estad.alertas(A, H), G: Estad.grupos(A, E.grupoPor || 'eje'), N, HN, nivel: nombreNivel(cur), colegio: config().colegio || {} };
+    const seleccion = (elegidos || [ens.id]).map((id) => Almacen.obtener('ensayos', id)).filter(Boolean)
+      .map((e) => ({ ens: e, A: e.id === ens.id ? A : Estad.analizar(e, cur, hojasDe(e, cur)) })).filter((x) => x.A.hechas.length)
+      .sort((a, b) => Estad.fechaOrden(a.ens).localeCompare(Estad.fechaOrden(b.ens)));
+    return { ens, cur, A, H, AL: Estad.alertas(A, H), G: Estad.grupos(A, E.grupoPor || 'eje'), N, HN, nivel: nombreNivel(cur), colegio: config().colegio || {}, seleccion };
   }
-  async function descargarInforme(tipo, ids) {
+  // Ensayos con hojas corregidas del curso activo, del más reciente al más antiguo
+  function ensayosConHojas(cur) {
+    return ensayos().filter((e) => Object.keys(hojasDe(e, cur)).length)
+      .sort((a, b) => Estad.fechaOrden(b).localeCompare(Estad.fechaOrden(a)));
+  }
+  // Antes de generar un informe se eligen los ensayos que entran (si hay más de uno con hojas)
+  function elegirEnsayos(tipo, ids) {
+    const ens = ensayoActivo(), cur = cursoActivo();
+    const lista = ensayosConHojas(cur);
+    if (lista.length <= 1) { descargarInforme(tipo, ids, [ens.id]); return; }
+    const grupo = Estad.grupoEnsayo(ens);
+    E.elegirInforme = { tipo, ids, marcados: lista.filter((e) => e.id === ens.id || Estad.grupoEnsayo(e) === grupo).map((e) => e.id) };
+    render();
+  }
+  function capaElegirInformes() {
+    const S = E.elegirInforme, cur = cursoActivo(), act = ensayoActivo();
+    const lista = ensayosConHojas(cur);
+    const n = S.marcados.length;
+    return `<div class="velo"><div class="hoja-inferior elegir-ensayos" role="dialog" aria-label="Elegir ensayos">
+      <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="font-size:18px">¿Qué ensayos incluir?</h2><button class="btn-redondo" data-accion="cancelar-informe" aria-label="Cerrar">${ICONO.cerrar}</button></div>
+      <span class="nota">El análisis detallado es del ensayo principal${act ? `: ${h(act.nombre)}` : ''}. Los demás aparecen en la evolución del curso y en la ficha de cada estudiante.</span>
+      <div class="filtros"><button data-accion="marcar-grupo" data-a="este">Solo el principal</button><button data-accion="marcar-grupo" data-a="asig">Misma asignatura</button><button data-accion="marcar-grupo" data-a="todos">Todos</button></div>
+      <div class="lista-elegir">${lista.map((e) => {
+        const on = S.marcados.includes(e.id), hechas = Object.keys(hojasDe(e, cur)).length;
+        return `<button class="opcion" data-accion="marcar-ensayo" data-a="${h(e.id)}" aria-pressed="${on}"><span class="caja">${on ? ICONO.check : ''}</span>
+          <span class="principal"><b>${h(e.nombre)}${e.id === act.id ? ' · principal' : ''}</b><span>${h([e.asignatura, e.fecha, `${hechas} hojas`].filter(Boolean).join(' · '))}</span></span></button>`;
+      }).join('')}</div>
+      <button class="btn primario grande" data-accion="generar-informe" ${n ? '' : 'disabled'}>Generar PDF con ${n} ensayo${n === 1 ? '' : 's'}</button>
+    </div></div>`;
+  }
+  async function descargarInforme(tipo, ids, elegidos) {
     toast('Preparando el informe…');
     try {
-      const ctx = contextoInforme();
-      const base = `${Almacen.id(ctx.cur.nombre)}_${Almacen.id(ctx.ens.nombre).slice(0, 30)}`;
+      // ensayo principal: el activo si está elegido; si no, el más reciente de los elegidos
+      const act = ensayoActivo();
+      const candidatos = (elegidos || [act.id]).map((id) => Almacen.obtener('ensayos', id)).filter(Boolean);
+      const principal = candidatos.find((e) => e.id === act.id) || candidatos.sort((a, b) => Estad.fechaOrden(b).localeCompare(Estad.fechaOrden(a)))[0] || act;
+      const ctx = contextoInforme(principal, candidatos.map((e) => e.id));
+      const base = `${Almacen.id(ctx.cur.nombre)}_${Almacen.id(ctx.ens.nombre).slice(0, 30)}${ctx.seleccion.length > 1 ? `_y_${ctx.seleccion.length - 1}_mas` : ''}`;
       const blob = tipo === 'curso' ? Informe.curso(ctx) : Informe.estudiantes(ctx, ids);
       const nombre = tipo === 'curso' ? `informe_docente_${base}.pdf`
         : ids && ids.length === 1 ? `ficha_${Almacen.id(ctx.A.estudiantes.find((x) => x.e.id === ids[0]).e.nombre)}_${base}.pdf` : `fichas_estudiantes_${base}.pdf`;
@@ -947,6 +984,7 @@
 
   function capas() {
     let html = '';
+    if (E.elegirInforme) html += capaElegirInformes();
     if (E.confirmar) {
       html += `<div class="velo"><div class="hoja-inferior" role="alertdialog" aria-label="Confirmar">
         <h2 style="font-size:18px">${h(E.confirmar.texto)}</h2>
@@ -1363,9 +1401,17 @@
     guardar: () => guardarRevision(),
     instalar: async () => { if (!pedidoInstalar) return; pedidoInstalar.prompt(); await pedidoInstalar.userChoice; pedidoInstalar = null; render(); },
     'ocultar-instalar': () => { E.ocultarInstalar = true; render(); },
-    'informe-curso': () => descargarInforme('curso'),
-    'informe-estudiantes': () => descargarInforme('estudiantes'),
-    'informe-estudiante': () => descargarInforme('estudiantes', [E.estAbierto]),
+    'informe-curso': () => elegirEnsayos('curso'),
+    'informe-estudiantes': () => elegirEnsayos('estudiantes'),
+    'informe-estudiante': () => elegirEnsayos('estudiantes', [E.estAbierto]),
+    'marcar-ensayo': (a) => { const m = E.elegirInforme.marcados; E.elegirInforme.marcados = m.includes(a) ? m.filter((x) => x !== a) : [...m, a]; E.mantenerScroll = true; render(); },
+    'marcar-grupo': (a) => {
+      const act = ensayoActivo(), lista = ensayosConHojas(cursoActivo());
+      E.elegirInforme.marcados = a === 'este' ? [act.id] : a === 'asig' ? lista.filter((e) => e.id === act.id || Estad.grupoEnsayo(e) === Estad.grupoEnsayo(act)).map((e) => e.id) : lista.map((e) => e.id);
+      E.mantenerScroll = true; render();
+    },
+    'generar-informe': () => { const S = E.elegirInforme; E.elegirInforme = null; render(); descargarInforme(S.tipo, S.ids, S.marcados); },
+    'cancelar-informe': () => { E.elegirInforme = null; render(); },
     excel: async () => {
       const ens = ensayoActivo(), cur = cursoActivo();
       await descargar(`resultados_${Almacen.id(cur.nombre)}_${Almacen.id(ens.nombre).slice(0, 30)}.xlsx`, Excel.exportarResultados(ens, cur, hojasDe(ens, cur), historialDelCurso(ens, cur)));

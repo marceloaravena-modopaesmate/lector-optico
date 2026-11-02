@@ -356,3 +356,14 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 /* Aviso de versión nueva */
 .aviso-version { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 60;
   background: var(--azul, #1A4080); color: #fff; border: 0; border-radius: 999px; padding: 12px 18px; font: 600 14px/1.2 inherit; box-shadow: 0 6px 20px rgba(0,0,0,.25); max-width: calc(100% - 32px); }
+
+/* Elegir los ensayos de un informe */
+.elegir-ensayos { max-height: 86vh; overflow-y: auto; }
+.lista-elegir { display: flex; flex-direction: column; gap: 6px; }
+.lista-elegir .opcion { display: flex; align-items: center; gap: 12px; text-align: left; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--borde); background: var(--superficie); color: var(--texto); font: inherit; cursor: pointer; }
+.lista-elegir .opcion[aria-pressed="true"] { border-color: var(--azul, #1A4080); background: var(--azul-suave); }
+.lista-elegir .caja { flex: none; width: 24px; height: 24px; border-radius: 7px; border: 2px solid var(--borde); display: grid; place-items: center; color: #fff; }
+.lista-elegir .opcion[aria-pressed="true"] .caja { background: var(--azul, #1A4080); border-color: var(--azul, #1A4080); }
+.lista-elegir .caja svg { width: 16px; height: 16px; }
+.lista-elegir .principal { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.lista-elegir .principal span { color: var(--texto-2); font-size: 13px; }
