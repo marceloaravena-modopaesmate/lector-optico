@@ -477,3 +477,7 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 :root[data-theme="dark"] .tono-5 { background: #43251A; color: #F7B99A; }
 :root[data-theme="dark"] .tono-6 { background: #13363F; color: #8FDDF0; }
 .inicio .cuerpo { padding-top: 18px; }
+
+.tarjeta-inicio.elegir { gap: 12px; }
+.tarjeta-inicio .campo { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; color: var(--texto-2); }
+.btn.cta:disabled { opacity: 0.45; box-shadow: none; }

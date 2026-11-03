@@ -82,8 +82,10 @@
   async function fijarConfig(cambios) { await Almacen.guardar('config', 'app', { ...config(), ...cambios }); }
   const ensayos = () => Almacen.lista('ensayos').sort((a, b) => (b.creado || '').localeCompare(a.creado || ''));
   const cursos = () => Almacen.lista('cursos').sort((a, b) => a.nombre.localeCompare(b.nombre));
-  function ensayoActivo() { const c = config(); return Almacen.obtener('ensayos', c.ensayo) || ensayos()[0] || null; }
-  function cursoActivo() { const c = config(); return Almacen.obtener('cursos', c.curso) || cursos()[0] || null; }
+  // Sin elección no hay ensayo ni curso activos: al abrir la app el docente los elige en Inicio
+  function ensayoActivo() { const c = config(); return (c.ensayo && Almacen.obtener('ensayos', c.ensayo)) || null; }
+  function cursoActivo() { const c = config(); return (c.curso && Almacen.obtener('cursos', c.curso)) || null; }
+  const hayDatos = () => ensayos().length > 0 && cursos().length > 0;
   const idResultados = (ensayoId, cursoId) => Almacen.id(ensayoId + '__' + cursoId);
   function hojasDe(ensayo, curso) {
     if (!ensayo || !curso) return {};
@@ -175,7 +177,15 @@
     })();
     const logo = '<svg class="logo-app" viewBox="0 0 48 48" aria-hidden="true"><rect x="10" y="6" width="28" height="36" rx="4" fill="#fff"/><g fill="#1A4080"><circle cx="24" cy="15" r="2.6"/><circle cx="31" cy="22" r="2.6"/><circle cx="17" cy="29" r="2.6"/><circle cx="24" cy="35" r="2.6"/></g><g fill="none" stroke="#1A4080" stroke-width="1.3"><circle cx="17" cy="15" r="2.3"/><circle cx="31" cy="15" r="2.3"/><circle cx="17" cy="22" r="2.3"/><circle cx="24" cy="22" r="2.3"/><circle cx="24" cy="29" r="2.3"/><circle cx="31" cy="29" r="2.3"/><circle cx="17" cy="35" r="2.3"/><circle cx="31" cy="35" r="2.3"/></g></svg>';
     let tarjeta;
-    if (!ens || !cur) {
+    if ((!ens || !cur) && hayDatos()) {
+      tarjeta = `<section class="tarjeta-inicio elegir">
+        <span class="eyebrow">Para empezar</span>
+        <span class="nombre">¿Con qué ensayo y curso trabajas hoy?</span>
+        <label class="campo" for="sel-ensayo">Ensayo<select id="sel-ensayo" data-cambio="ensayo"><option value="" ${ens ? '' : 'selected'}>Selecciona un ensayo…</option>${ensayos().map((e) => `<option value="${h(e.id)}" ${ens && e.id === ens.id ? 'selected' : ''}>${h(e.nombre)}</option>`).join('')}</select></label>
+        <label class="campo" for="sel-curso">Curso<select id="sel-curso" data-cambio="curso"><option value="" ${cur ? '' : 'selected'}>Selecciona un curso…</option>${cursos().map((c) => `<option value="${h(c.id)}" ${cur && c.id === cur.id ? 'selected' : ''}>${h(c.nombre)}</option>`).join('')}</select></label>
+        <button class="btn grande cta" disabled>${ICONO.camara} Corregir hojas</button>
+      </section>`;
+    } else if (!ens || !cur) {
       tarjeta = `<section class="tarjeta-inicio vacia">
         <span class="eyebrow">Para empezar</span>
         <span class="nombre">Crea un ensayo y carga tu curso</span>
@@ -406,6 +416,8 @@
   }
 
   function pVacio(titulo, texto) {
+    if (hayDatos()) return `<div class="pantalla">${cabecera(titulo, '')}<div class="cuerpo"><div class="tarjeta vacio">Elige primero el ensayo y el curso en Inicio.
+      <div class="fila-botones" style="margin-top:12px"><button class="btn primario" data-accion="ir" data-a="inicio">Ir a Inicio</button></div></div></div>${nav('')}</div>`;
     return `<div class="pantalla">${cabecera(titulo, '')}<div class="cuerpo"><div class="tarjeta vacio">${h(texto)}
       <div class="fila-botones" style="margin-top:12px"><button class="btn" data-accion="ir" data-a="ensayo-nuevo">Crear ensayo</button><button class="btn" data-accion="ejemplo">Usar ejemplo</button></div></div></div>${nav('')}</div>`;
   }
@@ -863,6 +875,7 @@
 
   function pFicha() {
     const ens = ensayoActivo(), cur = cursoActivo();
+    if (!ens || !cur) return pVacio('Estadísticas', '');
     const A = Estad.analizar(ens, cur, hojasDe(ens, cur));
     const N = nivelDe(cur).nivel ? analisisNivel(ens, cur) : null;
     const conNivel = N && N.porCurso.length >= 2;
@@ -1352,7 +1365,7 @@
     E.pantalla = pantalla;
     E.hojaPregunta = null;
     if (pantalla === 'camara') {
-      if (!ensayoActivo()) { toast('Primero crea o elige un ensayo.'); E.pantalla = 'ensayos'; render(); return; }
+      if (!ensayoActivo() || !cursoActivo()) { toast(hayDatos() ? 'Primero elige el ensayo y el curso.' : 'Primero crea un ensayo y carga un curso.'); E.pantalla = hayDatos() ? 'inicio' : 'ensayos'; render(); return; }
       render();
       await encenderCamara();
     }
@@ -1844,8 +1857,8 @@
 
   raiz.addEventListener('change', async (ev) => {
     const el = ev.target;
-    if (el.dataset.cambio === 'ensayo') { await fijarConfig({ ensayo: el.value }); render(); }
-    if (el.dataset.cambio === 'curso') { await fijarConfig({ curso: el.value }); render(); }
+    if (el.dataset.cambio === 'ensayo') { await fijarConfig({ ensayo: el.value || null }); E.inf = null; render(); }
+    if (el.dataset.cambio === 'curso') { await fijarConfig({ curso: el.value || null }); E.inf = null; render(); }
     if (el.dataset.cambio === 'inf-est') { const S = estadoInformes(); S.todos = el.value === '__todos'; S.est = S.todos ? null : el.value; S.ensayosEst = null; S.ejes = null; E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'inf-desde' || el.dataset.cambio === 'inf-hasta') { const S = estadoInformes(); S[el.dataset.cambio.slice(4)] = el.value; S.ensayosEst = null; E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'estudiante' && el.value) {
@@ -1897,6 +1910,7 @@
 
   window.addEventListener('pagehide', apagarCamara);
 
-  Almacen.iniciar().then(() => render(), () => render());
+  // Cada vez que se abre la app parte sin ensayo ni curso elegidos
+  Almacen.iniciar().then(async () => { if (config().ensayo || config().curso) await fijarConfig({ ensayo: null, curso: null }); render(); }, () => render());
   render();
 })();
