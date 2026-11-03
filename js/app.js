@@ -567,6 +567,9 @@
           : '<span style="font-size:14px;color:var(--texto-2)">Crea un ensayo para generar las hojas.</span>'}
         </section>
         <button class="btn grande cta" data-accion="envio-curso">✉ Enviar resultados por correo a todo el curso</button>
+        <label class="btn punteado grande" for="cd-excel">${ICONO.subir} Actualizar lista desde Excel (correos, RUT, nombres)</label>
+        <input type="file" id="cd-excel" accept=".xlsx,.xls" class="oculto-visual" data-archivo="curso">
+        <span class="nota">Usa la plantilla de lista de curso con este curso escrito igual en la columna D (${h(c.nombre)}). Las hojas corregidas se conservan.</span>
         <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 class="titulo-seccion">Estudiantes</h2>
           <button class="btn" style="min-height:36px" data-accion="nuevo-est">+ Agregar</button></div>
         <span class="nota">Toca un estudiante para editar su perfil: nombre, curso, RUT y correos.</span>
