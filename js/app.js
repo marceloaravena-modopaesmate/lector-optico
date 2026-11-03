@@ -349,8 +349,8 @@
         ${vivo ? `<div class="estado" id="estado-camara">${h(E.camara.mensaje || 'Buscando la hoja…')}</div>` : ''}
         ${E.procesando ? `<div class="procesando" role="status">Leyendo la hoja…${E.cola.length ? ` (quedan ${E.cola.length})` : ''}</div>` : ''}
       </div>
-      <input type="file" id="foto-camara" accept="image/*" capture="environment" class="oculto-visual" data-archivo="foto">
-      <input type="file" id="foto-galeria" accept="image/*" multiple class="oculto-visual" data-archivo="foto">
+      <input type="file" id="foto-camara" accept="image/*,.heic,.heif" capture="environment" class="oculto-visual" data-archivo="foto">
+      <input type="file" id="foto-galeria" accept="image/*,.heic,.heif" multiple class="oculto-visual" data-archivo="foto">
       <div class="controles-camara">
         ${vivo ? `<div class="lado"><button class="interruptor" role="switch" aria-checked="${E.camara.auto}" data-accion="auto" aria-label="Captura automática"></button><span>Captura automática</span></div>
         <button class="disparador" data-accion="capturar" aria-label="Tomar foto"></button>` : `<div class="lado"></div><label class="disparador" for="foto-camara" aria-label="Tomar foto"></label>`}
@@ -1701,12 +1701,38 @@
     siguienteDeCola();
   }
 
+  // Fotos HEIC/HEIF (iPhone): si el navegador no las abre, se convierten a JPEG con heic2any
+  const esHeic = (f) => /image\/hei[cf]/i.test(f.type || '') || /\.hei[cf]$/i.test(f.name || '');
+  let cargaHeic = null;
+  function cargarHeic2any() {
+    if (window.heic2any) return Promise.resolve(window.heic2any);
+    if (cargaHeic) return cargaHeic;
+    const fuentes = ['lib/heic2any.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/heic2any/0.0.4/heic2any.min.js', 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js'];
+    cargaHeic = fuentes.reduce((prev, url) => prev.catch(() => new Promise((ok, mal) => {
+      const sc = document.createElement('script'); sc.src = url;
+      sc.onload = () => (window.heic2any ? ok(window.heic2any) : mal(new Error('sin heic2any')));
+      sc.onerror = () => { sc.remove(); mal(new Error('no cargó ' + url)); };
+      document.head.appendChild(sc);
+    })), Promise.reject(new Error('inicio'))).catch((e) => { cargaHeic = null; throw e; });
+    return cargaHeic;
+  }
+  async function abrirFoto(archivo) {
+    const heic = esHeic(archivo);
+    if (!heic) return createImageBitmap(archivo, { imageOrientation: 'from-image' });
+    try { return await createImageBitmap(archivo, { imageOrientation: 'from-image' }); } catch (e) { /* el navegador no lee HEIC: convertir */ }
+    toast('Convirtiendo foto HEIC…');
+    const conv = await cargarHeic2any();
+    let jpg = await conv({ blob: archivo, toType: 'image/jpeg', quality: 0.92 });
+    if (Array.isArray(jpg)) jpg = jpg[0];
+    return createImageBitmap(jpg, { imageOrientation: 'from-image' });
+  }
+
   async function siguienteDeCola() {
     const archivo = E.cola.shift();
     if (!archivo) return;
     E.procesando = true; render();
     try {
-      const bmp = await createImageBitmap(archivo, { imageOrientation: 'from-image' });
+      const bmp = await abrirFoto(archivo);
       const esc = Math.min(1, 3200 / Math.max(bmp.width, bmp.height));
       const c = document.createElement('canvas');
       c.width = Math.round(bmp.width * esc); c.height = Math.round(bmp.height * esc);
