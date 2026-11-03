@@ -204,18 +204,38 @@
           }).join('')}</div></section>`;
       }
     }
-    return `<div class="pantalla">
-      <header class="cabecera"><div class="titulos"><span class="saludo">${saludo()}</span><span class="marca">Lector óptico</span></div>
-      <button class="btn-redondo" data-accion="ir" data-a="ajustes" aria-label="Ajustes y respaldo">${ICONO.ajustes}</button></header>
+    // Portada: franja azul con el logo, el colegio y cifras generales
+    const col = config().colegio || {};
+    const totalHojas = Almacen.lista('resultados').reduce((n, r) => n + Object.keys(r.hojas || {}).length, 0);
+    const burbujas = (() => {
+      const llenas = new Set([1, 7, 8, 14, 18, 21, 27, 31, 34, 40]);
+      let c = '';
+      for (let f = 0; f < 6; f++) for (let k = 0; k < 7; k++) { const i = f * 7 + k; c += `<circle cx="${14 + k * 26}" cy="${14 + f * 26}" r="8" ${llenas.has(i) ? 'class="llena"' : ''}/>`; }
+      return `<svg class="portada-fondo" viewBox="0 0 182 156" aria-hidden="true">${c}</svg>`;
+    })();
+    const logo = '<svg class="logo-app" viewBox="0 0 48 48" aria-hidden="true"><rect x="9" y="5" width="30" height="38" rx="3" fill="#fff"/><g fill="#1A4080"><rect x="11" y="7" width="3" height="3"/><rect x="34" y="7" width="3" height="3"/><rect x="11" y="38" width="3" height="3"/><rect x="34" y="38" width="3" height="3"/></g><g fill="none" stroke="#1A4080" stroke-width="1.3"><circle cx="17" cy="15" r="2.4"/><circle cx="31" cy="15" r="2.4"/><circle cx="17" cy="22" r="2.4"/><circle cx="24" cy="22" r="2.4"/><circle cx="24" cy="29" r="2.4"/><circle cx="31" cy="29" r="2.4"/><circle cx="17" cy="35" r="2.4"/><circle cx="31" cy="35" r="2.4"/></g><g fill="#1A4080"><circle cx="24" cy="15" r="2.6"/><circle cx="31" cy="22" r="2.6"/><circle cx="17" cy="29" r="2.6"/><circle cx="24" cy="35" r="2.6"/></g></svg>';
+    const cifra = (n, t) => `<div><b class="num">${n}</b><span>${t}</span></div>`;
+    const tile = (accion, a, icono, tono, titulo, sub, ancho = false) => `<button data-accion="${accion}" data-a="${a}" class="${ancho ? 'ancho' : ''}"><span class="icono-tile tono-${tono}">${icono}</span><b>${titulo}</b><span>${sub}</span></button>`;
+    return `<div class="pantalla inicio">
+      <header class="portada">${burbujas}
+        <div class="portada-fila">
+          <div class="portada-marca">${logo}<div><span class="saludo">${saludo()}</span><span class="marca">Lector óptico</span></div></div>
+          <button class="btn-redondo" data-accion="ir" data-a="ajustes" aria-label="Ajustes y respaldo">${ICONO.ajustes}</button>
+        </div>
+        <p class="lema">Corrige ensayos PAES y SIMCE con la cámara y convierte los resultados en decisiones pedagógicas.</p>
+        ${col.nombre ? `<span class="portada-colegio">${col.logo ? `<img src="${col.logo.src}" alt="">` : ''}${h(col.nombre)}</span>` : ''}
+        ${ensayos().length || cursos().length ? `<div class="portada-cifras">${cifra(ensayos().length, ensayos().length === 1 ? 'ensayo' : 'ensayos')}${cifra(cursos().length, cursos().length === 1 ? 'curso' : 'cursos')}${cifra(totalHojas, 'hojas corregidas')}</div>` : ''}
+      </header>
       <div class="cuerpo">${avisoInstalar()}${tarjeta}
+        <h2 class="titulo-seccion">¿Qué quieres hacer?</h2>
         <div class="mosaico">
-          <button data-accion="ir" data-a="informes">${ICONO.informe}<b>Informes</b><span>Directivo, docente, estudiante y apoderados</span></button>
-          <button data-accion="ir" data-a="ensayos">${ICONO.doc}<b>Ensayos</b><span>Claves, ejes y habilidades</span></button>
-          <button data-accion="ir" data-a="cursos">${ICONO.grupo}<b>Cursos</b><span>Listas y hojas con QR</span></button>
-          <button data-accion="ir-tab" data-a="curso">${ICONO.grafico}<b>Estadísticas</b><span>Curso, preguntas, estudiantes e historial</span></button>
-          <button data-accion="ir-tab" data-a="nivel">${ICONO.grupo}<b>Paralelos</b><span>Compara los cursos del nivel</span></button>
-          <button data-accion="ir-tab" data-a="alertas">${ICONO.alerta}<b>Alertas</b><span>Estudiantes en riesgo y grupos de reforzamiento</span></button>
-          <button data-accion="ir" data-a="colegio">${ICONO.informe}<b>Colegio</b><span>Todos los niveles y asignaturas</span></button>
+          ${tile('ir', 'informes', ICONO.informe, 1, 'Informes', 'Directivo, docente, estudiante y apoderados')}
+          ${tile('ir-tab', 'curso', ICONO.grafico, 2, 'Estadísticas', 'Curso, preguntas, estudiantes e historial')}
+          ${tile('ir', 'ensayos', ICONO.doc, 3, 'Ensayos', 'Claves, ejes y habilidades')}
+          ${tile('ir', 'cursos', ICONO.grupo, 4, 'Cursos', 'Listas y hojas con QR')}
+          ${tile('ir-tab', 'nivel', ICONO.grupo, 2, 'Paralelos', 'Compara los cursos del nivel')}
+          ${tile('ir-tab', 'alertas', ICONO.alerta, 5, 'Alertas', 'Estudiantes en riesgo y reforzamiento')}
+          ${tile('ir', 'colegio', ICONO.informe, 1, 'Colegio', 'Todos los niveles y asignaturas en un tablero', true)}
         </div>${recientes}
       </div>${nav('inicio')}</div>`;
   }
