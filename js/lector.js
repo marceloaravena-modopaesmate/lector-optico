@@ -20,6 +20,10 @@ const Lector = (() => {
     duda: 0.20,     // entre duda y llena: marca débil o borrón, se pide revisar
     ventajaClara: 0.30, // si dos están marcadas pero una está mucho más rellena, se sugiere esa
     difTono: 0.18,      // diferencia de tono para sospechar que una marca está borrada
+    // Marcas suaves (lápiz claro): se compara el tono de cada burbuja con el de las vacías de la misma fila
+    contrasteClaro: 0.10, // desde aquí una burbuja más oscura que las demás cuenta como marcada
+    contrasteDuda: 0.06,  // entre duda y claro se pide revisar
+    contrasteOtra: 0.05,  // si otra burbuja también supera esto, puede ser un borrón
   };
 
   // ---------- Utilidades de imagen ----------
@@ -358,15 +362,31 @@ const Lector = (() => {
   }
 
   // medidas: [{fraccion, tono}] por alternativa. tono: 0 = negro, 1 = papel
+  // Sin burbujas bien rellenas: busca una marca suave (gris claro) que destaque frente a las vacías de la fila.
+  // debil: índice de una burbuja con relleno parcial ya detectado (o -1)
+  function decidirSuave(medidas, letras, debil) {
+    const tonos = medidas.map((m, i) => ({ t: m.tono, i })).sort((a, b) => a.t - b.t);
+    const [osc, seg] = tonos;
+    const resto = tonos.slice(1).map((x) => x.t);
+    const base = resto[Math.floor(resto.length / 2)]; // tono típico de una burbuja vacía en esta fila
+    const c1 = base - osc.t, c2 = seg ? base - seg.t : 0;
+    if (c1 >= UMBRAL.contrasteClaro) {
+      if (c2 < UMBRAL.contrasteOtra) {
+        return { letra: letras[osc.i], estado: 'ok', motivo: 'marca suave', tonoSuave: osc.t };
+      }
+      return { letra: letras[osc.i], estado: 'revisar', motivo: c1 - c2 >= 0.06 ? 'posible borrón' : 'marcas suaves' };
+    }
+    if (c1 >= UMBRAL.contrasteDuda || debil >= 0) return { letra: letras[debil >= 0 ? debil : osc.i], estado: 'revisar', motivo: 'marca débil' };
+    return { letra: '', estado: 'blanco' };
+  }
+
+  // medidas: [{fraccion, tono}] por alternativa. tono: 0 = negro, 1 = papel
   function decidir(medidas, letras) {
     const valores = medidas.map((m) => m.fraccion);
     const orden = valores.map((v, i) => ({ v, i, tono: medidas[i].tono })).sort((a, b) => b.v - a.v);
     const [primera, segunda] = orden;
     const marcadas = orden.filter((o) => o.v >= UMBRAL.llena);
-    if (marcadas.length === 0) {
-      if (primera.v >= UMBRAL.duda) return { letra: letras[primera.i], estado: 'revisar', motivo: 'marca débil' };
-      return { letra: '', estado: 'blanco' };
-    }
+    if (marcadas.length === 0) return decidirSuave(medidas, letras, primera.v >= UMBRAL.duda ? primera.i : -1);
     if (marcadas.length === 1) {
       if (segunda && segunda.v >= UMBRAL.duda && primera.v - segunda.v < UMBRAL.ventajaClara) {
         return { letra: letras[primera.i], estado: 'revisar', motivo: 'posible borrón' };
@@ -393,6 +413,17 @@ const Lector = (() => {
         medidas.push(relleno(hoja, x, y));
       }
       respuestas.push({ ...decidir(medidas, Diseno.LETRAS), valores: medidas.map((m) => Math.round(m.fraccion * 100) / 100) });
+    }
+    // Una sombra de borde nítido deja "marcas suaves" iguales en la misma columna de varias filas seguidas:
+    // en ese caso se piden revisar en vez de darlas por buenas
+    for (let p = 0; p < respuestas.length; p++) {
+      const a = respuestas[p];
+      if (a.motivo !== 'marca suave') continue;
+      let q = p;
+      while (q + 1 < respuestas.length && (q + 1) % Diseno.RESP.filas !== 0 && respuestas[q + 1].motivo === 'marca suave'
+        && respuestas[q + 1].letra === a.letra && Math.abs(respuestas[q + 1].tonoSuave - a.tonoSuave) < 0.03) q++;
+      if (q - p >= 2) for (let k = p; k <= q; k++) respuestas[k] = { ...respuestas[k], estado: 'revisar', motivo: 'marca suave o sombra' };
+      p = q;
     }
     return respuestas;
   }
