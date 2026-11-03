@@ -1406,9 +1406,9 @@ const Informe = (() => {
 
   // ---------- 1. Resumen para equipo directivo ----------
   // ctxD: { ens, nivel, porCurso: [{ curso, A }], inst: análisis conjunto, colegio, validacion }
-  function seccionDirectivo(P, ctxD, { sinNota = false, numero = '' } = {}) {
+  function seccionDirectivo(P, ctxD, { sinNota = false, numero = '', tituloBanda = '' } = {}) {
     const { ens, porCurso, inst } = ctxD, R = inst.resumen;
-    banda(P, numero ? `${numero} ${ens.nombre}` : 'Resumen para equipo directivo', numero ? `Detalle de ${ctxD.nivel || 'los cursos seleccionados'}` : `${ens.nombre} · ${ctxD.nivel || 'Cursos seleccionados'}`, [tipoEvaluacion(ens), ens.fecha, `generado el ${hoy()}`].filter(Boolean).join(' · '));
+    banda(P, numero ? `${numero} ${ens.nombre}` : tituloBanda || 'Resumen para equipo directivo', numero ? `Detalle de ${ctxD.nivel || 'los cursos seleccionados'}` : `${ens.nombre} · ${ctxD.nivel || 'Cursos seleccionados'}`, [tipoEvaluacion(ens), ens.fecha, `generado el ${hoy()}`].filter(Boolean).join(' · '));
     titulo(P, 'Información general', 0, 50);
     ficha(P, [
       ['Establecimiento', (ctxD.colegio || {}).nombre || 'Sin nombre (se define en Ajustes)'],
@@ -2027,6 +2027,59 @@ const Informe = (() => {
     notaMetodologica(P, { tieneTabla: M2.ensayos.some((e) => Estad.tieneTabla(e)), tieneCortes: M2.bloques.some((b) => !!b.inst.estandares) });
     piePaginas(P); return P.doc.output('blob');
   }
+  // Informe de un ensayo con todos los cursos que lo rindieron (de cualquier nivel):
+  // el resumen y la comparación entre cursos, cada pregunta por curso y, si se pide, la nómina de cada curso
+  function ensayoCursos(ctxD, { nomina = true } = {}) {
+    const P = docCon(ctxD, pieDe(ctxD, 'Informe del ensayo', `${ctxD.ens.nombre}`));
+    seccionDirectivo(P, ctxD, { sinNota: true, tituloBanda: 'Informe del ensayo' });
+    if (ctxD.validacion && !ctxD.validacion.ok) { piePaginas(P); return P.doc.output('blob'); }
+    const { ens, porCurso, inst } = ctxD;
+    let num = porCurso.length >= 2 ? 6 : 5;
+    // Pregunta por pregunta, con el acierto de cada curso
+    nuevaPagina(P);
+    seccion(P, num++, 'Resultados por pregunta y curso', 60);
+    const k = porCurso.length, anchoC = Math.max(11, Math.min(17, (W - 12 - 10 - 40 - 16 - 18) / Math.max(1, k)));
+    const anchoEje = W - 12 - 10 - anchoC * k - 16 - (k >= 2 ? 18 : 0);
+    const cols = [{ titulo: 'N°', ancho: 12, negrita: true }, { titulo: 'Clave', ancho: 10, negrita: false }, { titulo: 'Eje', ancho: anchoEje, negrita: false },
+      ...porCurso.map((x) => ({ titulo: x.curso.nombre, ancho: anchoC, der: true, negrita: false })), { titulo: 'Total', ancho: 16, der: true, negrita: true }];
+    if (k >= 2) cols.push({ titulo: 'Brecha', ancho: 18, der: true, negrita: false });
+    tabla(P, cols, inst.preguntas.map((p) => {
+      const vals = porCurso.map((x) => x.A.preguntas[p.i].acierto);
+      const br = vals.length >= 2 ? Math.max(...vals) - Math.min(...vals) : 0;
+      const celdas = [p.piloto ? `${p.n} (piloto)` : p.n, p.clave, p.eje || '–', ...vals.map((v) => pct(v)), pct(p.acierto)];
+      if (k >= 2) celdas.push(`${Math.round(br * 100)} pp`);
+      return { resaltar: !p.piloto && p.acierto < 0.4, celdas };
+    }), { tam: k > 6 ? 7.6 : 8.4 });
+    parrafo(P, `Porcentaje de estudiantes que respondió correctamente cada pregunta. En color, las preguntas con menos de 40% de acierto en el total.${k >= 2 ? ' Brecha: diferencia entre el curso con mayor y menor acierto.' : ''}${inst.preguntas.some((p) => p.piloto) ? ' Las preguntas piloto se muestran, pero no cuentan para el logro.' : ''}`, { color: C.texto2, tam: 8.5 });
+    const dif = inst.preguntas.filter((p) => !p.piloto).sort((a, b) => a.acierto - b.acierto).slice(0, 8);
+    if (dif.length) {
+      titulo(P, 'Las preguntas que más costaron', 4, 40);
+      tabla(P, [{ titulo: 'N°', ancho: 12, negrita: true }, { titulo: 'Eje y habilidad', ancho: W - 12 - 18 - 30 - 34, envolver: true, negrita: false }, { titulo: 'Acierto', ancho: 18, der: true },
+        { titulo: 'Más elegida', ancho: 30, der: true, negrita: false }, { titulo: 'En blanco', ancho: 34, der: true, negrita: false }],
+      dif.map((p) => ({ celdas: [p.n, [p.eje, p.habilidad].filter(Boolean).join(' · ') || '–', pct(p.acierto), p.masElegida && p.masElegida !== p.clave ? `${p.masElegida} (clave ${p.clave})` : `la clave ${p.clave}`, pct(p.omision)] })));
+    }
+    // Nómina de cada curso
+    if (nomina) {
+      const conPuntaje = Estad.tieneTabla(ens), conEstandar = !!inst.estandares;
+      porCurso.forEach((x, idx) => {
+        nuevaPagina(P);
+        if (idx === 0) seccion(P, num++, 'Resultados de cada estudiante', 40);
+        const R = x.A.resumen;
+        titulo(P, `${x.curso.nombre}: ${R.corregidas} de ${R.total} evaluados · logro promedio ${pct(R.media)}${conPuntaje && R.puntajeMedia != null ? ` · ${R.puntajeMedia} pts.` : ''}`, 0, 40);
+        const filas = x.A.estudiantes.slice().sort((a, b) => (a.e.lista || 0) - (b.e.lista || 0)).map((y) => (y.corregida
+          ? { celdas: [y.e.lista, nombreCompleto(y.e.nombre), `${y.correctas}/${x.A.n}`, pct(y.logro), conPuntaje ? (y.puntaje != null ? y.puntaje : '–') : nt(y.nota), conEstandar ? y.estandar.nombre : Estad.tramoDe(y.logro).nombre] }
+          : { celdas: [y.e.lista, nombreCompleto(y.e.nombre), 'sin hoja', '', '', ''] }));
+        tabla(P, [{ titulo: 'N°', ancho: 11, negrita: false }, { titulo: 'Estudiante', ancho: W - 11 - 22 - 18 - 20 - 36, negrita: true }, { titulo: 'Correctas', ancho: 22, der: true, negrita: false },
+          { titulo: 'Logro', ancho: 18, der: true, negrita: false }, { titulo: conPuntaje ? 'Puntaje' : 'Nota', ancho: 20, der: true, negrita: false }, { titulo: conEstandar ? 'Estándar' : 'Nivel', ancho: 36, der: true, negrita: false }],
+        filas, { tam: 8.6 });
+      });
+      parrafo(P, `${conPuntaje ? 'Puntaje PAES estimado con la tabla de conversión del ensayo (no es el puntaje oficial). ' : ''}${conEstandar ? 'Estándar SIMCE estimado con los cortes del ensayo.' : `Nivel según los cortes de Ajustes (Medio desde ${pct(Estad.conf.niveles.medio)}, Alto desde ${pct(Estad.conf.niveles.alto)}).`}`, { color: C.texto2, tam: 8.5 });
+    }
+    nuevaPagina(P);
+    notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!inst.estandares });
+    piePaginas(P); return P.doc.output('blob');
+  }
+
   function docente(ctx, { fichas = true } = {}) {
     const P = docCon(ctx, pieDe(ctx, 'Informe para el docente', `${ctx.ens.nombre} · ${ctx.cur.nombre}`));
     cuerpoCurso(P, ctx);
@@ -2056,5 +2109,5 @@ const Informe = (() => {
     return { indicadores: ctxD.inst.resumen, alertas: alertasInstitucionales(ctxD.porCurso, ctxD.inst) };
   }
 
-  return { curso, estudiantes, estudiante, directivo, directivoConsolidado, docente, acumulado, completo, vistaPrevia };
+  return { curso, estudiantes, estudiante, directivo, directivoConsolidado, ensayoCursos, docente, acumulado, completo, vistaPrevia };
 })();
