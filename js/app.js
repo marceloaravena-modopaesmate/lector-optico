@@ -86,6 +86,13 @@
   function ensayoActivo() { const c = config(); return (c.ensayo && Almacen.obtener('ensayos', c.ensayo)) || null; }
   function cursoActivo() { const c = config(); return (c.curso && Almacen.obtener('cursos', c.curso)) || null; }
   const hayDatos = () => ensayos().length > 0 && cursos().length > 0;
+  // Ensayos que se están corrigiendo a la vez: el elegido en Inicio y los que se sumen
+  function ensayosEnCorreccion() {
+    const act = ensayoActivo();
+    if (!act) return [];
+    const extra = (config().ensayosExtra || []).filter((id) => id !== act.id).map((id) => Almacen.obtener('ensayos', id)).filter(Boolean);
+    return [act, ...extra];
+  }
   const idResultados = (ensayoId, cursoId) => Almacen.id(ensayoId + '__' + cursoId);
   function hojasDe(ensayo, curso) {
     if (!ensayo || !curso) return {};
@@ -209,13 +216,16 @@
             <span class="detalle">${h(cur.nombre)} · ${ens.preguntas.length} preguntas${ens.fecha ? ' · ' + h(ens.fecha) : ''}</span>
           </div>
         </div>
-        <button class="btn grande cta" data-accion="ir" data-a="camara">${ICONO.camara} Corregir hojas</button>
+        <button class="btn grande cta" data-accion="ir" data-a="camara">${ICONO.camara} Corregir hojas${ensayosEnCorreccion().length > 1 ? ` de ${ensayosEnCorreccion().length} ensayos` : ''}</button>
         <div class="dos">
           <label class="oculto-visual" for="sel-ensayo">Ensayo</label>
           <select id="sel-ensayo" data-cambio="ensayo">${ensayos().map((e) => `<option value="${h(e.id)}" ${e.id === ens.id ? 'selected' : ''}>${h(e.nombre)}</option>`).join('')}</select>
           <label class="oculto-visual" for="sel-curso">Curso</label>
           <select id="sel-curso" data-cambio="curso">${cursos().map((c) => `<option value="${h(c.id)}" ${c.id === cur.id ? 'selected' : ''}>${h(c.nombre)}</option>`).join('')}</select>
         </div>
+        ${ensayos().length > 1 ? `<div class="corregir-tambien"><span class="etiqueta">También corrijo en esta sesión</span>
+          <div class="filtros">${ensayos().filter((e) => e.id !== ens.id).map((e) => `<button data-accion="extra-ensayo" data-a="${h(e.id)}" aria-pressed="${ensayosEnCorreccion().some((x) => x.id === e.id)}">${h(e.nombre)}</button>`).join('')}</div>
+          ${ensayosEnCorreccion().length > 1 ? '<span class="nota">Las hojas con QR se guardan solas en su ensayo. En las hojas sin QR eliges el ensayo al revisarlas.</span>' : ''}</div>` : ''}
       </section>`;
     }
     let recientes = '';
@@ -284,7 +294,9 @@
     const hechas = cur ? cur.estudiantes.filter((e) => hojas[e.id]).length : 0;
     const vivo = !!E.camara.stream;
     return `<div class="pantalla sin-nav camara">
-      ${cabecera(ens ? ens.nombre : 'Sin ensayo', cur ? `${cur.nombre} · ${hechas} de ${cur.estudiantes.length} corregidas` : '', 'inicio')}
+      ${(() => { const set = ensayosEnCorreccion(); return set.length > 1
+        ? cabecera(`${set.length} ensayos en corrección`, cur ? `${cur.nombre} · ${set.map((e) => `${etiquetaEnsayo(e)}: ${cur.estudiantes.filter((x) => hojasDe(e, cur)[x.id]).length}/${cur.estudiantes.length}`).join(' · ')}` : '', 'inicio')
+        : cabecera(ens ? ens.nombre : 'Sin ensayo', cur ? `${cur.nombre} · ${hechas} de ${cur.estudiantes.length} corregidas` : '', 'inicio'); })()}
       <div class="visor">
         ${vivo ? '<video id="video" playsinline muted autoplay></video><canvas class="overlay" id="overlay"></canvas>' : `
         <div class="sin-camara">
@@ -334,6 +346,12 @@
     if (pendientes) avisos.push(`<div class="aviso rev">${ICONO.alerta}<span><b>${pendientes} por revisar:</b> toca la pregunta y elige la respuesta.</span></div>`);
     if (rev.yaExistia) avisos.push(`<div class="aviso rev">${ICONO.alerta}<span>Este estudiante ya tenía una hoja corregida. Al guardar se reemplaza.</span></div>`);
     let selector = '';
+    // Sin QR del ensayo, el docente puede indicar a qué ensayo corresponde la hoja
+    if (!rev.ensayoQR && rev.origen !== 'guardada' && ensayos().length > 1) {
+      const opciones = ensayosEnCorreccion().length > 1 ? ensayosEnCorreccion() : ensayos();
+      if (!opciones.some((e) => e.id === ens.id)) opciones.unshift(ens);
+      selector += `<div class="tarjeta pad"><label class="campo" for="rev-ensayo">Ensayo de esta hoja<select id="rev-ensayo" data-cambio="rev-ensayo">${opciones.map((e) => `<option value="${h(e.id)}" ${e.id === ens.id ? 'selected' : ''}>${h(e.nombre)}</option>`).join('')}</select></label></div>`;
+    }
     if (!est) {
       const cur = rev.curso || cursoActivo();
       selector = `<div class="tarjeta pad"><span class="etiqueta">¿De quién es esta hoja?</span>
@@ -1667,7 +1685,8 @@
       const activo = ensayoActivo();
       let r;
       try {
-        r = Lector.procesar(imageData, { preguntas: activo.preguntas.length, alternativas: activo.alternativas });
+        const set = ensayosEnCorreccion();
+        r = Lector.procesar(imageData, { preguntas: Math.max(...set.map((e) => e.preguntas.length)), alternativas: Math.max(...set.map((e) => e.alternativas)) });
       } catch (e) { r = { ok: false, error: 'Ocurrió un error al leer la hoja: ' + e.message }; }
       E.procesando = false;
       if (!r.ok) {
@@ -1708,8 +1727,9 @@
       respuestas.push(x.estado === 'doble' ? '' : x.letra);
       estados.push(x.estado);
     }
+    const ensayoQR = !!(r.qr && r.qr.ensayo && Almacen.id(r.qr.ensayo) === ensayo.id);
     E.revision = {
-      ensayo, curso, estudiante, origen, motivoSinEstudiante: motivo, error,
+      ensayo, curso, estudiante, origen, motivoSinEstudiante: motivo, error, ensayoQR,
       respuestas, estados, lectura: r.respuestas, hoja: r.hoja, cambios: 0,
       yaExistia: !!(estudiante && hojasDe(ensayo, curso)[estudiante.id]),
     };
@@ -1742,7 +1762,9 @@
       cambiosManuales: rev.cambios + ((doc.hojas[rev.estudiante.id] || {}).cambiosManuales || 0) * (rev.origen === 'guardada' ? 1 : 0),
     } };
     try { await Almacen.guardar('resultados', id, doc); } catch (e) { toast(e.message); return; }
-    if (rev.curso.id !== config().curso || rev.ensayo.id !== config().ensayo) await fijarConfig({ curso: rev.curso.id, ensayo: rev.ensayo.id });
+    // Al corregir varios ensayos a la vez, guardar una hoja de otro de ellos no cambia el ensayo elegido
+    const enSet = ensayosEnCorreccion().some((e) => e.id === rev.ensayo.id);
+    if (rev.curso.id !== config().curso || (!enSet && rev.ensayo.id !== config().ensayo)) await fijarConfig({ curso: rev.curso.id, ...(enSet ? {} : { ensayo: rev.ensayo.id }) });
     toast(`Guardado: ${corto(rev.estudiante.nombre)}, ${correctas} de ${n}`);
     const venia = rev.origen;
     E.revision = null;
@@ -2049,6 +2071,11 @@
     'editar-est': (a) => { E.estEditado = a; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'nuevo-est': () => { E.estEditado = null; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'guardar-est': () => guardarPerfilEstudiante(),
+    'extra-ensayo': async (a) => {
+      const act = (config().ensayosExtra || []);
+      await fijarConfig({ ensayosExtra: act.includes(a) ? act.filter((x) => x !== a) : [...act, a] });
+      E.mantenerScroll = true; render();
+    },
     'cerrar-correo': () => { E.correoListo = null; E.mantenerScroll = true; render(); },
     'correo-abierto': () => { toast('Recuerda adjuntar el PDF antes de enviar'); },
     'copiar-correo': async () => {
@@ -2141,6 +2168,16 @@
     if (el.dataset.cambio === 'formato-nombre') { await fijarConfig({ formatoNombre: el.value }); toast('Guardado'); E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'inf-est') { const S = estadoInformes(); S.todos = el.value === '__todos'; S.est = S.todos ? null : el.value; S.ensayosEst = null; S.ejes = null; E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'inf-desde' || el.dataset.cambio === 'inf-hasta') { const S = estadoInformes(); S[el.dataset.cambio.slice(4)] = el.value; S.ensayosEst = null; E.mantenerScroll = true; render(); }
+    if (el.dataset.cambio === 'rev-ensayo') {
+      const rev = E.revision, ens = Almacen.obtener('ensayos', el.value);
+      if (!rev || !ens) return;
+      const n = ens.preguntas.length;
+      rev.ensayo = ens; rev.respuestas = []; rev.estados = []; rev.cambios = 0;
+      for (let i = 0; i < n; i++) { const x = (rev.lectura || [])[i] || { letra: '', estado: 'blanco' }; rev.respuestas.push(x.estado === 'doble' ? '' : x.letra); rev.estados.push(x.estado); }
+      rev.error = (rev.lectura || []).length < n ? `La hoja tiene ${(rev.lectura || []).length} preguntas y el ensayo ${n}.` : '';
+      rev.yaExistia = !!(rev.estudiante && hojasDe(ens, rev.curso)[rev.estudiante.id]);
+      E.mantenerScroll = true; render();
+    }
     if (el.dataset.cambio === 'estudiante' && el.value) {
       const rev = E.revision;
       const cur = rev.curso || cursoActivo();
@@ -2193,6 +2230,6 @@
   // Cada vez que se abre la app parte sin ensayo ni curso elegidos. Una recarga dentro de la misma sesión
   // (por ejemplo, al actualizarse la app a mitad de una corrección) mantiene la elección.
   const sesionNueva = (() => { try { if (sessionStorage.getItem('lector-sesion')) return false; sessionStorage.setItem('lector-sesion', '1'); } catch (e) { /* sin sessionStorage */ } return true; })();
-  Almacen.iniciar().then(async () => { if (sesionNueva && (config().ensayo || config().curso)) await fijarConfig({ ensayo: null, curso: null }); render(); }, () => render());
+  Almacen.iniciar().then(async () => { if (sesionNueva && (config().ensayo || config().curso || (config().ensayosExtra || []).length)) await fijarConfig({ ensayo: null, curso: null, ensayosExtra: [] }); render(); }, () => render());
   render();
 })();
