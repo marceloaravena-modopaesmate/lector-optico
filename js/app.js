@@ -756,8 +756,8 @@
     return Estad.nivel(ens, paralelosDe(cur), (c) => hojasDe(ens, c), nombreNivel(cur));
   }
   // Todo lo que necesita un informe PDF del curso activo. ens es el ensayo principal; elegidos, los ids de los ensayos a incluir.
-  function contextoInforme(ens, elegidos) {
-    const cur = cursoActivo();
+  function contextoInforme(ens, elegidos, curElegido) {
+    const cur = curElegido || cursoActivo();
     const A = Estad.analizar(ens, cur, hojasDe(ens, cur));
     const H = historialDelCurso(ens, cur);
     const nv = nivelDe(cur).nivel;
@@ -1292,7 +1292,7 @@
     const delNivel = cursosEns.filter((c) => nombreNivel(c) === S.nivel);
     S.cursos = S.cursos.filter((id) => delNivel.some((c) => c.id === id));
     if (!S.cursos.length && delNivel.length) S.cursos = delNivel.map((c) => c.id);
-    if (!S.cursos.includes(S.cursoDoc)) S.cursoDoc = S.cursos[0] || null;
+    if (!delNivel.some((c) => c.id === S.cursoDoc)) { const act = cursoActivo(); S.cursoDoc = (delNivel.find((c) => act && c.id === act.id) || delNivel[0] || {}).id || null; }
     const curDoc = S.cursoDoc && Almacen.obtener('cursos', S.cursoDoc);
     return { S, asigs, delGrupo, ens, delNivel, curDoc };
   }
@@ -1344,11 +1344,18 @@
     return { ens, nivel, porCurso, inst: N.A, brechas: N.brechas, colegio: config().colegio || {}, validacion, anterior };
   }
   // Contexto del informe docente con los cursos elegidos para comparar
+  // Sin comparación (cursosSel con solo el curso), el informe es solo del curso
   function contextoDocente(ens, cur, cursosSel) {
-    const ctx = contextoInforme(ens, [ens.id]);
+    const ctx = contextoInforme(ens, [ens.id], cur);
     if (cursosSel.length >= 2) ctx.N = Estad.nivel(ens, cursosSel, (c) => hojasDe(ens, c), nombreNivel(cur));
-    else ctx.N = null;
+    else { ctx.N = null; ctx.HN = null; }
     return ctx;
+  }
+  // Cursos del informe docente o completo: el curso elegido y, si se pidió comparar, los otros marcados
+  function cursosComparados(S, curDoc) {
+    if (!curDoc) return [];
+    if (!S.comparar) return [curDoc];
+    return [curDoc, ...S.cursos.filter((id) => id !== curDoc.id).map((id) => Almacen.obtener('cursos', id)).filter(Boolean)];
   }
   function contextoEstudiante(cur, est, S) {
     const ids = S.ensayosEst || ensayosEst(cur, est.id, S).map((e) => e.id);
@@ -1386,6 +1393,10 @@
         <div class="lista-elegir">${disponibles.map((e) => opcion('inf-ens-est', e.id, S.ensayosEst.includes(e.id), e.nombre, [e.asignatura, e.fecha, `${e.preguntas.filter((p) => !p.piloto).length} preguntas`].filter(Boolean).join(' · '))).join('') || '<span class="nota">No hay ensayos en ese período.</span>'}</div>
         ${ejes.length > 1 ? `<span class="etiqueta">Temáticas</span><div class="filtros">${chip('inf-eje', '__todas', !S.ejes, 'Todas')}${ejes.map((x) => chip('inf-eje', x, !!S.ejes && S.ejes.includes(x), x)).join('')}</div>` : ''}`;
     }
+    if ((S.dest === 'docente' || S.dest === 'completo') && delNivel.length > 1) {
+      opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-comparar" aria-pressed="${!!S.comparar}"><span class="caja">${S.comparar ? ICONO.check : ''}</span><span class="principal"><b>Agregar comparación con otros cursos</b><span>Suma al final del informe una sección que compara ${h(curDoc ? curDoc.nombre : 'el curso')} con los cursos que marques. Sin esta opción, el informe es solo del curso.</span></span></button></div>`;
+      if (S.comparar) opciones += `<span class="etiqueta">Cursos para comparar</span><div class="filtros">${delNivel.filter((c) => !curDoc || c.id !== curDoc.id).map((c) => chip('inf-curso', c.id, S.cursos.includes(c.id), c.nombre)).join('')}</div>`;
+    }
     if (S.dest === 'docente' || S.dest === 'completo') opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-fichas" aria-pressed="${S.fichas}"><span class="caja">${S.fichas ? ICONO.check : ''}</span><span class="principal"><b>Incluir fichas técnicas de cada estudiante</b><span>Agrega una página por estudiante, con su lugar en el curso y su análisis técnico.</span></span></button></div>`;
     if (S.dest === 'ensayo') opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-ens-nomina" aria-pressed="${S.nominaEns !== false}"><span class="caja">${S.nominaEns !== false ? ICONO.check : ''}</span><span class="principal"><b>Incluir la nómina de cada curso</b><span>Una tabla por curso con cada estudiante: correctas, logro, ${'puntaje o nota'} y nivel. Sin esta opción, el informe no lleva nombres de estudiantes.</span></span></button></div>`;
     if (S.dest === 'directivo') opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-dir-detalle" aria-pressed="${!!S.detalleDir}"><span class="caja">${S.detalleDir ? ICONO.check : ''}</span><span class="principal"><b>Incluir el detalle de cada ensayo</b><span>Agrega, después del resumen, los indicadores completos de cada ensayo por nivel. Sin esta opción, el informe queda en 2 o 3 páginas.</span></span></button></div>
@@ -1411,7 +1422,7 @@
           <div class="tarjeta"><span>Hojas corregidas</span><b class="num">${ev}</b></div><div class="tarjeta"><span>Logro promedio</span><b class="num">${pct(media)}</b></div></div>
           <span class="nota">${M2.bloques.length > 1 ? `Resumen de todos los cursos y ensayos: tabla curso por ensayo, participación, evolución, ejes y alertas.${S.detalleDir ? ` Después, el detalle de cada ensayo por nivel (${M2.bloques.length} secciones).` : ''}` : 'Un solo ensayo y un nivel: se genera el informe directivo de ese ensayo.'}</span>`;
       } else if (!individual || S.dest === 'completo') {
-        const D = S.dest === 'ensayo' ? contextoEnsayo(S, ens) : contextoDirectivo(ens, cursosSel, S.nivel), R = D.inst.resumen, al = Informe.vistaPrevia(D).alertas;
+        const D = S.dest === 'ensayo' ? contextoEnsayo(S, ens) : contextoDirectivo(ens, cursosComparados(S, curDoc), S.nivel), R = D.inst.resumen, al = Informe.vistaPrevia(D).alertas;
         previa += `<div class="cifras cuatro"><div class="tarjeta"><span>Evaluados</span><b class="num">${R.corregidas}<span style="font-size:14px">/${R.total}</span></b></div>
           <div class="tarjeta"><span>Participación</span><b class="num">${pct(R.participacion)}</b></div><div class="tarjeta"><span>Logro promedio</span><b class="num">${pct(R.media)}</b></div>
           <div class="tarjeta"><span>Alertas</span><b class="num">${al.length}</b></div></div>
@@ -1435,10 +1446,9 @@
       ${S.dest === 'directivo' ? '' : paso(2, 'Ensayo', `<div class="lista-elegir">${delGrupo.map((e) => opcion('inf-ens', e.id, e.id === S.ens, e.nombre, [e.fecha, `${cursos().filter((c) => conHojasEn(e, c)).length} cursos con hojas`].filter(Boolean).join(' · '))).join('')}</div>`)}
       ${S.dest === 'ensayo' ? (() => { const CE = cursosDelEnsayo(S, ens); return paso(3, 'Cursos', `<span class="nota">Todos los cursos que rindieron ${h(ens.nombre)}${[...new Set(CE.disponibles.map((c) => nombreNivel(c)))].length > 1 ? ', de todos los niveles' : ''}. Quita los que no quieras incluir.</span>
         <div class="filtros">${CE.disponibles.map((c) => chip('inf-ens-curso', c.id, CE.sel.some((x) => x.id === c.id), c.nombre)).join('')}</div>`); })() : ''}
-      ${S.dest === 'directivo' || S.dest === 'ensayo' ? '' : paso(3, 'Nivel y cursos', `${(() => { const nvs = [...new Set(cursos().filter((c) => conHojasEn(ens, c)).map((c) => nombreNivel(c)))]; return nvs.length > 1 ? `<div class="filtros">${nvs.map((n) => chip('inf-nivel', n, n === S.nivel, n)).join('')}</div>` : ''; })()}
-        <span class="nota">Marca los cursos que quieres comparar.</span>
-        <div class="filtros">${delNivel.map((c) => chip('inf-curso', c.id, S.cursos.includes(c.id), c.nombre)).join('')}</div>
-        ${S.cursos.length > 1 && S.dest !== 'directivo' ? `<span class="etiqueta">Curso del informe docente e individual</span><div class="filtros">${S.cursos.map((id) => chip('inf-curso-doc', id, id === S.cursoDoc, (Almacen.obtener('cursos', id) || {}).nombre || id)).join('')}</div>` : ''}`)}
+      ${S.dest === 'directivo' || S.dest === 'ensayo' ? '' : paso(3, 'Curso', `${(() => { const nvs = [...new Set(cursos().filter((c) => conHojasEn(ens, c)).map((c) => nombreNivel(c)))]; return nvs.length > 1 ? `<div class="filtros">${nvs.map((n) => chip('inf-nivel', n, n === S.nivel, n)).join('')}</div>` : ''; })()}
+        <span class="nota">Elige el curso del informe.</span>
+        <div class="filtros">${delNivel.map((c) => chip('inf-curso-doc', c.id, c.id === S.cursoDoc, c.nombre)).join('')}</div>`)}
       ${paso(4, 'Destinatario', `<div class="lista-elegir">${DESTINOS.map((d) => opcion('inf-dest', d.id, d.id === S.dest, d.nombre, d.detalle)).join('')}</div>`)}
       ${opciones ? paso(5, 'Opciones', opciones) : ''}
       ${paso(opciones ? 6 : 5, 'Vista previa', previa || '<span class="nota">Elige las opciones de arriba.</span>')}
@@ -1472,10 +1482,10 @@
         blob = Informe.ensayoCursos(D, { nomina: S.nominaEns !== false });
         archivo = `informe_ensayo_${nombre(ens.nombre)}_${D.porCurso.length}_cursos.pdf`;
       } else if (S.dest === 'docente') {
-        blob = Informe.docente(contextoDocente(ens, curDoc, cursosSel), { fichas: S.fichas });
+        blob = Informe.docente(contextoDocente(ens, curDoc, cursosComparados(S, curDoc)), { fichas: S.fichas });
         archivo = `informe_docente_${nombre(curDoc.nombre)}_${nombre(ens.nombre)}.pdf`;
       } else if (S.dest === 'completo') {
-        blob = Informe.completo({ dir: contextoDirectivo(ens, cursosSel, S.nivel), doc: contextoDocente(ens, curDoc, cursosSel), estudiantes: estudiantesSel(), fichas: S.fichas });
+        blob = Informe.completo({ dir: contextoDirectivo(ens, cursosComparados(S, curDoc), S.nivel), doc: contextoDocente(ens, curDoc, cursosComparados(S, curDoc)), estudiantes: estudiantesSel(), fichas: S.fichas });
         archivo = `informe_completo_${nombre(curDoc.nombre)}_${nombre(ens.nombre)}.pdf`;
       } else {
         const lista = estudiantesSel();
@@ -2238,6 +2248,7 @@
     },
     'inf-nivel': (a) => { const S = estadoInformes(); S.nivel = a; S.cursos = []; E.mantenerScroll = true; render(); },
     'inf-curso': (a) => { const S = estadoInformes(); S.cursos = S.cursos.includes(a) ? S.cursos.filter((x) => x !== a) : [...S.cursos, a]; if (!S.cursos.length) S.cursos = [a]; E.mantenerScroll = true; render(); },
+    'inf-comparar': () => { const S = estadoInformes(); S.comparar = !S.comparar; if (S.comparar) S.cursos = datosInformes().delNivel.map((c) => c.id); E.mantenerScroll = true; render(); },
     'inf-curso-doc': (a) => { const S = estadoInformes(); S.cursoDoc = a; S.est = null; S.ensayosEst = null; E.mantenerScroll = true; render(); },
     'inf-dest': (a) => { estadoInformes().dest = a; E.mantenerScroll = true; render(); },
     'inf-fichas': () => { const S = estadoInformes(); S.fichas = !S.fichas; E.mantenerScroll = true; render(); },
