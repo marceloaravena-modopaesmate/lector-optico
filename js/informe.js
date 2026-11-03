@@ -842,6 +842,7 @@ const Informe = (() => {
     if (ctx.validacion && !ctx.validacion.ok) { parrafo(P, 'Hay problemas en los datos que afectan los cálculos. Corrígelos y vuelve a generar el informe: no se muestran estadísticas para no entregar cifras engañosas.', { estilo: 'bold', color: C.critico }); return; }
     titulo(P, 'Lo principal', ctx.conPortada ? 0 : 4);
     vinetas(P, lineasPrincipales(ctx));
+    bloqueObservaciones(P, ens, [cur]);
     const tarjetas = [
       { etiqueta: 'Logro promedio', valor: pct(R.media), detalle: `mediana ${pct(R.mediana)}` },
       { etiqueta: 'Nota promedio', valor: nt(R.notaMedia), detalle: `exigencia ${pct(Estad.conf.escala.exigencia)}` },
@@ -1644,6 +1645,23 @@ const Informe = (() => {
   }
 
   // Tres hallazgos para el resumen ejecutivo
+  // Observaciones de la aplicación que registra el colegio en cada ensayo (generales y por curso)
+  function observacionesDe(ens, cursos) {
+    const o = (ens && ens.obs) || {}, oc = o.cursos || {};
+    const cs = cursos.map((c) => ({ curso: c, texto: ((oc[c.id] || {}).texto || '').trim(), irregular: !!(oc[c.id] || {}).irregular })).filter((x) => x.texto || x.irregular);
+    return { general: (o.general || '').trim(), cursos: cs, irregulares: cs.filter((x) => x.irregular).map((x) => x.curso) };
+  }
+  function bloqueObservaciones(P, ens, cursos, { tit = 'Observaciones de la aplicación', antes = 4 } = {}) {
+    const O = observacionesDe(ens, cursos);
+    if (!O.general && !O.cursos.length) return O;
+    titulo(P, tit, antes, 30);
+    if (O.general) parrafo(P, O.general, { tam: 10, estilo: 'italic' });
+    if (O.cursos.length) vinetas(P, O.cursos.map((x) => `${x.curso.nombre}${x.irregular ? ' (aplicación irregular)' : ''}: ${x.texto || 'se registró que no rindió el ensayo en condiciones normales.'}`), { tam: 10 });
+    if (O.irregulares.length) parrafo(P, `Los resultados de ${lista(O.irregulares.map((c) => c.nombre))} no reflejan necesariamente lo que ${O.irregulares.length === 1 ? 'ese curso sabe' : 'esos cursos saben'}: se informan, pero conviene no usarlos para comparar ni para tomar decisiones hasta contar con una nueva aplicación.`, { color: C.critico, tam: 9.5 });
+    return O;
+  }
+  const avisoIrregulares = (O) => (O.irregulares.length ? ` Ojo: ${lista(O.irregulares.map((c) => c.nombre))} ${O.irregulares.length === 1 ? 'tuvo' : 'tuvieron'} una aplicación irregular, así que esta diferencia debe leerse con cautela.` : '');
+
   function hallazgos(ctxD, ejes) {
     const { porCurso, inst } = ctxD, u = Estad.conf.institucional, h = [];
     if (ejes.length >= 2) { const a = ejes[0], z = ejes[ejes.length - 1]; h.push(`El eje mejor logrado es ${a.nombre} (${pct(a.logro)}) y el más descendido, ${z.nombre} (${pct(z.logro)}): ${Math.round((a.logro - z.logro) * 100)} pp de diferencia.`); }
@@ -1652,7 +1670,7 @@ const Informe = (() => {
     h.push(crit.length ? `${plural(crit.length, 'pregunta tiene', 'preguntas tienen')} menos de 40% de acierto (${numeros(crit.slice(0, 8))}${crit.length > 8 ? ' y otras' : ''}): son el punto de partida para la reenseñanza.` : 'Ninguna pregunta quedó bajo 40% de acierto en el conjunto.');
     if (porCurso.length >= 2) {
       const o = porCurso.slice().sort((a, b) => b.A.resumen.media - a.A.resumen.media), d = o[0].A.resumen.media - o[o.length - 1].A.resumen.media, br = (ctxD.brechas || []).length;
-      h.push(d >= u.brechaCurso ? `Hay ${Math.round(d * 100)} pp de diferencia entre ${o[0].curso.nombre} y ${o[o.length - 1].curso.nombre}${br ? `, y ${plural(br, 'pregunta muestra', 'preguntas muestran')} 25 pp o más de brecha entre cursos` : ''}.` : `Los cursos tienen resultados parecidos: ${Math.round(d * 100)} pp entre el mejor y el más bajo.`);
+      h.push((d >= u.brechaCurso ? `Hay ${Math.round(d * 100)} pp de diferencia entre ${o[0].curso.nombre} y ${o[o.length - 1].curso.nombre}${br ? `, y ${plural(br, 'pregunta muestra', 'preguntas muestran')} 25 pp o más de brecha entre cursos` : ''}.` : `Los cursos tienen resultados parecidos: ${Math.round(d * 100)} pp entre el mejor y el más bajo.`) + avisoIrregulares(observacionesDe(ctxD.ens, porCurso.map((x) => x.curso))));
     } else {
       const R = inst.resumen;
       if (R.notaMedia != null && R.corregidas) h.push(`${R.corregidas - R.aprobados} de ${R.corregidas} estudiantes quedan bajo la nota ${nt(Estad.conf.escala.aprobacion)}.`);
@@ -1676,6 +1694,8 @@ const Informe = (() => {
   function recomendacionesUTP(ctxD, ejes, habs) {
     const { ens, porCurso, inst } = ctxD, R = inst.resumen, u = Estad.conf.institucional, rec = [];
     const e0 = ejes[ejes.length - 1], h0 = habs[habs.length - 1];
+    const irr = observacionesDe(ens, porCurso.map((x) => x.curso)).irregulares;
+    if (irr.length) rec.push(`Reaplicar un ensayo equivalente en ${lista(irr.map((c) => c.nombre))} en condiciones normales, y conversar con ${irr.length === 1 ? 'el curso' : 'los cursos'} el sentido de los ensayos: sin compromiso, los resultados no sirven para orientar el trabajo ni para la preparación de cada estudiante.`);
     if (e0 && e0.logro < 0.6) { const te = Temarios.eje(ens.asignatura, e0.nombre); rec.push(`${e0.nombre}: coordinar entre los docentes del nivel una unidad de refuerzo${te ? ` centrada en ${lista(te.contenidos.slice(0, 3).map(minus))}` : ''} y medir su avance en el próximo ensayo.`); }
     if (h0 && h0.logro < 0.6) rec.push(`La habilidad ${minus(h0.nombre)}: incluirla de forma explícita en las planificaciones de todas las unidades, no solo en la del eje más bajo.`);
     if (porCurso.length >= 2) {
@@ -1759,6 +1779,7 @@ const Informe = (() => {
     titulo(P, 'Resumen ejecutivo', conPortada ? 0 : 4, 60);
     if (!conPortada) cifras(P, cifrasGrupo(inst));
     parrafo(P, resumenTexto(ctxD), { tam: 10.5 });
+    const O = bloqueObservaciones(P, ens, porCurso.map((x) => x.curso));
     titulo(P, 'Hallazgos clave', 4, 30);
     vinetas(P, hallazgos(ctxD, ejes), { tam: 10 });
     titulo(P, 'Prioridades', 4, 30);
@@ -1775,6 +1796,7 @@ const Informe = (() => {
     if (porCurso.length >= 2) {
       seccion(P, ns++, 'Comparación entre cursos', 70);
       compararCursos(P, porCurso, inst, { nombreInst: 'Total', partes: 'resumen' });
+      if (O.irregulares.length) parrafo(P, avisoIrregulares(O).trim(), { color: C.critico, tam: 9.5 });
       if (porCurso.length <= 7) { titulo(P, 'Curvas de distribución por curso', 5, 85); curvasSuperpuestas(P, porCurso); }
     }
     if (ctxD.anterior) { seccion(P, ns++, 'Evolución respecto del ensayo anterior', 60); compararAnterior(P, ctxD); }
@@ -1791,6 +1813,7 @@ const Informe = (() => {
     seccion(P, ns++, porCurso.length >= 2 ? 'Preguntas críticas y brechas entre cursos' : 'Preguntas críticas', 60);
     preguntasCriticas(P, ctxD, { completa: tablaPreguntas });
     const al = alertasInstitucionales(porCurso, inst);
+    O.irregulares.forEach((c) => al.unshift(`${c.nombre} tuvo una aplicación irregular según lo registrado por el colegio: sus resultados probablemente subestiman lo que el curso sabe.`));
     seccion(P, ns++, 'Alertas y recomendaciones para UTP', 50);
     titulo(P, 'Alertas institucionales', 0, 30);
     vinetas(P, al.length ? al : ['No se activó ninguna alerta con los criterios actuales.'], { tam: 10 });
@@ -1902,6 +1925,12 @@ const Informe = (() => {
       barras(P, ej.map((g) => ({ nombre: g.nombre, valor: g.logro, color: g.logro < u.ejeBajo ? C.critico : C.serie })));
     }
 
+    // Observaciones registradas en cada ensayo
+    const conObs = ens.map((e) => ({ e, O: observacionesDe(e, cursos.filter((c) => celda(e, c))) })).filter((x) => x.O.general || x.O.cursos.length);
+    if (conObs.length) {
+      seccion(P, ns++, 'Observaciones de la aplicación', 40);
+      conObs.forEach(({ e }) => bloqueObservaciones(P, e, cursos.filter((c) => celda(e, c)), { tit: e.nombre, antes: 2 }));
+    }
     // 5. Alertas y prioridades
     seccion(P, ns++, 'Alertas y prioridades', 50);
     const al = [];
@@ -1913,6 +1942,7 @@ const Informe = (() => {
     });
     ej.filter((g) => g.logro < u.ejeBajo).forEach((g) => al.push(`${g.nombre} tiene ${pct(g.logro)} de logro considerando todos los ensayos: es una prioridad a nivel de departamento.`));
     ens.forEach((e, i) => { if (T[i].total && T[i].evaluados / T[i].total < u.participacion) al.push(`Participación baja en ${e.nombre} (${pct(T[i].evaluados / T[i].total)}): los resultados pueden no representar a todos los cursos.`); });
+    conObs.forEach(({ e, O }) => O.irregulares.forEach((c) => al.push(`${c.nombre} tuvo una aplicación irregular en ${e.nombre}: ese resultado se debe leer con cautela.`)));
     vinetas(P, al.length ? al : ['No se activó ninguna alerta con los criterios actuales.'], { tam: 10 });
     const rec = [];
     const peor = ej[ej.length - 1];
@@ -2519,6 +2549,7 @@ const Informe = (() => {
     titulo(P, 'Síntesis comparativa', 0, 50);
     parrafo(P, resumenTexto(ctxD), { tam: 10.5 });
     vinetas(P, hallazgos(ctxD, ejes), { tam: 10 });
+    const O = bloqueObservaciones(P, ens, porCurso.map((x) => x.curso));
     let ns = 1;
     seccion(P, ns++, 'Resultados por curso', 70);
     compararCursos(P, porCurso, inst, { nombreInst: ctxD.nivel || 'Total', partes: 'resumen' });
@@ -2535,7 +2566,7 @@ const Informe = (() => {
     preguntasBrecha(P, ctxD);
     if (ctxD.anterior) { seccion(P, ns++, 'Evolución del nivel', 60); compararAnterior(P, ctxD); }
     seccion(P, ns++, 'Recomendaciones para el departamento', 50);
-    vinetas(P, recDepartamento(ctxD, ejes), { tam: 10 });
+    vinetas(P, [...(O.irregulares.length ? [`Antes de comparar, considerar que ${lista(O.irregulares.map((c) => c.nombre))} no ${O.irregulares.length === 1 ? 'rindió' : 'rindieron'} el ensayo en condiciones normales: conviene reaplicar o dejar ${O.irregulares.length === 1 ? 'ese curso' : 'esos cursos'} fuera de las conclusiones.`] : []), ...recDepartamento(ctxD, ejes)], { tam: 10 });
     nuevaPagina(P);
     seccion(P, ns++, 'Anexo técnico', 60);
     tablaIndicadores(P, inst);

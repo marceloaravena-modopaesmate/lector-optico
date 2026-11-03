@@ -1460,6 +1460,26 @@
       if (op) pasos += paso(S.dest === 'completo' ? 'Opciones' : 'Estudiante y ensayos', op);
     }
 
+    // Observaciones de la aplicación (solo informes institucionales y del docente)
+    if (!['estudiante', 'apoderado'].includes(S.dest)) {
+      const grupos = modo === 'dirC' ? (() => { const D2 = seleccionDirectiva(S, delGrupo); return D2.ensSel.map((e) => ({ ens: e, cs: D2.cursosSel.filter((c) => conHojasEn(e, c)) })); })()
+        : modo === 'dirA' ? [{ ens, cs: cursosDelEnsayo(S, ens).sel }]
+          : modo === 'dirB' || modo === 'docB' ? [{ ens, cs: delNivel }]
+            : [{ ens, cs: curDoc ? [curDoc] : [] }];
+      const cuerpo = grupos.filter((g) => g.cs.length).map(({ ens: e, cs }) => {
+        const o = e.obs || {}, oc = o.cursos || {};
+        return `${grupos.length > 1 ? `<span class="etiqueta">${h(e.nombre)}</span>` : ''}
+          <label class="campo">Comentario general del ensayo<textarea rows="3" data-cambio="obs-general" data-ens="${h(e.id)}" placeholder="Ej.: se aplicó el viernes en la última hora y varios cursos lo respondieron sin compromiso.">${h(o.general || '')}</textarea></label>
+          ${cs.map((c) => { const x = oc[c.id] || {}; return `<div class="obs-curso"><div class="lista-elegir"><button class="opcion" data-accion="obs-irregular" data-a="${h(e.id + '|' + c.id)}" aria-pressed="${!!x.irregular}"><span class="caja">${x.irregular ? ICONO.check : ''}</span><span class="principal"><b>${h(c.nombre)}: aplicación irregular</b><span>Márcalo si el curso no rindió el ensayo como correspondía.</span></span></button></div>
+            <input data-cambio="obs-curso" data-ens="${h(e.id)}" data-curso="${h(c.id)}" value="${h(x.texto || '')}" placeholder="Comentario sobre ${h(c.nombre)} (opcional)" aria-label="Comentario sobre ${h(c.nombre)}"></div>`; }).join('')}`;
+      }).join('');
+      if (cuerpo) {
+        const hay = grupos.some(({ ens: e }) => e.obs && (e.obs.general || Object.values(e.obs.cursos || {}).some((x) => x.irregular || x.texto)));
+        pasos += paso('Observaciones de la aplicación', `<details class="obs-ensayo"${hay || S.obsAbierto ? ' open' : ''}><summary>${hay ? 'Ver o editar las observaciones' : 'Agregar comentarios sobre cómo se rindió el ensayo'}</summary>
+          <span class="nota">Lo que anotes aparece en los informes para directivos y docentes, y se considera en el análisis: por ejemplo, un curso marcado como irregular se advierte en la comparación, las alertas y las prioridades. No aparece en los informes de estudiantes ni apoderados.</span>${cuerpo}</details>`);
+      }
+    }
+
     // Vista previa
     let previa = '';
     try {
@@ -1508,6 +1528,13 @@
     </div>${nav('')}</div>`;
   }
 
+  // Guarda las observaciones de la aplicación dentro del ensayo
+  async function guardarObs(idEns, cambiar) {
+    const e = Almacen.obtener('ensayos', idEns); if (!e) return;
+    const obs = JSON.parse(JSON.stringify(e.obs || {})); obs.cursos = obs.cursos || {};
+    cambiar(obs);
+    await Almacen.guardar('ensayos', idEns, { ...e, obs });
+  }
   async function generarInformeModulo() {
     const { S, ens, curDoc, delGrupo } = datosInformes();
     if (!ens) return;
@@ -2313,6 +2340,11 @@
     'inf-curso-doc': (a) => { const S = estadoInformes(); S.cursoDoc = a; S.est = null; S.ensayosEst = null; E.mantenerScroll = true; render(); },
     'inf-dest': (a) => { const S = estadoInformes(); S.dest = a; if (a === 'directivo') S.tipoDir = S.tipoDir || 'A'; if (a === 'docente') S.tipoDoc = S.tipoDoc || 'A'; S.ensayosEst = null; E.mantenerScroll = true; render(); },
     'inf-tipo': (a) => { const S = estadoInformes(); if (S.dest === 'directivo') S.tipoDir = a; else S.tipoDoc = a; if (a === 'B') S.cursos = datosInformes().delNivel.map((c) => c.id); E.mantenerScroll = true; render(); },
+    'obs-irregular': async (a) => {
+      const [idE, idC] = a.split('|');
+      await guardarObs(idE, (o) => { const x = o.cursos[idC] || {}; o.cursos[idC] = { ...x, irregular: !x.irregular }; });
+      estadoInformes().obsAbierto = true; E.mantenerScroll = true; render();
+    },
     'inf-mas-ens': () => { const S = estadoInformes(); S.masEns = !S.masEns; S.ensayosEst = null; S.ejes = null; E.mantenerScroll = true; render(); },
     'inf-fichas': () => { const S = estadoInformes(); S.fichas = !S.fichas; E.mantenerScroll = true; render(); },
     'inf-ens-est': (a) => { const S = estadoInformes(); S.ensayosEst = (S.ensayosEst || []).includes(a) ? S.ensayosEst.filter((x) => x !== a) : [...(S.ensayosEst || []), a]; E.mantenerScroll = true; render(); },
@@ -2464,6 +2496,8 @@
     if (el.dataset.cambio === 'ensayo') { await fijarConfig({ ensayo: el.value || null }); E.inf = null; render(); }
     if (el.dataset.cambio === 'curso') { await fijarConfig({ curso: el.value || null }); E.inf = null; render(); }
     if (el.dataset.cambio === 'formato-nombre') { await fijarConfig({ formatoNombre: el.value }); toast('Guardado'); E.mantenerScroll = true; render(); }
+    if (el.dataset.cambio === 'obs-general') { await guardarObs(el.dataset.ens, (o) => { o.general = el.value.trim(); }); estadoInformes().obsAbierto = true; toast('Observación guardada'); }
+    if (el.dataset.cambio === 'obs-curso') { await guardarObs(el.dataset.ens, (o) => { const x = o.cursos[el.dataset.curso] || {}; o.cursos[el.dataset.curso] = { ...x, texto: el.value.trim() }; }); estadoInformes().obsAbierto = true; toast('Observación guardada'); }
     if (el.dataset.cambio === 'inf-est') { const S = estadoInformes(); S.todos = el.value === '__todos'; S.est = S.todos ? null : el.value; S.ensayosEst = null; S.ejes = null; E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'inf-desde' || el.dataset.cambio === 'inf-hasta') { const S = estadoInformes(); S[el.dataset.cambio.slice(4)] = el.value; S.ensayosEst = null; E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'rev-ensayo') {
