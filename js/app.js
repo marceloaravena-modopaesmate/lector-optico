@@ -1160,7 +1160,7 @@
       if (!para) { toast('Falta el correo.'); return; }
       const col = config().colegio || {};
       const ens = r.elegidos.length === 1 ? `el ensayo ${r.elegidos[0].nombre}` : `${r.elegidos.length} ensayos (${r.elegidos.map((e) => e.nombre).join(', ')})`;
-      const nombre = Estad.nombres(r.est.nombre).pila;
+      const nombre = Estad.nombres(r.est.nombre).corto;
       const asunto = `Informe de resultados${apo ? ' de ' + Estad.nombres(r.est.nombre).completo : ''} - ${r.elegidos.length === 1 ? r.elegidos[0].nombre : r.elegidos.length + ' ensayos'}`;
       const cuerpo = apo
         ? `Estimado(a) apoderado(a):\n\nLe envío adjunto el informe de resultados de ${Estad.nombres(r.est.nombre).completo} (${r.cur.nombre}) en ${ens}. Incluye sus fortalezas, los aspectos por reforzar y orientaciones para acompañarlo(a) desde la casa.\n\nQuedo atento(a) a sus consultas.\n\nSaludos cordiales${col.nombre ? ',\n' + col.nombre : ''}`
@@ -1260,13 +1260,25 @@
   }
   // ---------- Informes y análisis de resultados ----------
   const DESTINOS = [
-    { id: 'completo', nombre: 'Informe completo', detalle: 'Las cuatro secciones en un PDF: directivo, docente, estudiante y apoderados' },
-    { id: 'directivo', nombre: 'Equipo directivo', detalle: 'Visión global y comparación entre cursos, sin datos individuales' },
-    { id: 'ensayo', nombre: 'Informe del ensayo (todos los cursos)', detalle: 'Un ensayo con todos los cursos que lo rindieron: comparación, cada pregunta por curso y la nómina de resultados' },
-    { id: 'docente', nombre: 'Docente', detalle: 'Diagnóstico del curso, pregunta por pregunta, comparación y plan de intervención' },
-    { id: 'estudiante', nombre: 'Estudiante', detalle: 'Informe individual acumulativo: uno o varios ensayos y temáticas' },
-    { id: 'apoderado', nombre: 'Padres y apoderados', detalle: 'Resultado, fortalezas y orientaciones para la familia, sin comparaciones' },
+    { id: 'directivo', nombre: 'Equipo directivo', detalle: 'Visión global, comparación entre cursos y prioridades, sin datos individuales' },
+    { id: 'docente', nombre: 'Docente', detalle: 'Diagnóstico del curso, pregunta por pregunta, estudiantes y plan de acción' },
+    { id: 'estudiante', nombre: 'Estudiante', detalle: 'Informe personal del ensayo, con la opción de sumar más ensayos rendidos' },
+    { id: 'apoderado', nombre: 'Padres y apoderados', detalle: 'Resumen breve del resultado, fortalezas y cómo apoyar desde la casa' },
+    { id: 'completo', nombre: 'Informe completo', detalle: 'Todo en un PDF: directivo, docente, estudiante y apoderados de un curso' },
   ];
+  const TIPOS = {
+    directivo: [
+      { id: 'A', nombre: 'A. Todos los cursos que rindieron el ensayo', detalle: 'Un ensayo con todos sus cursos, de cualquier nivel: comparación, cada pregunta por curso y, si quieres, la nómina' },
+      { id: 'B', nombre: 'B. Cursos del mismo nivel', detalle: 'Un ensayo y los paralelos de un nivel: resumen ejecutivo, curvas por curso, brechas y prioridades' },
+      { id: 'C', nombre: 'C. Cursos y ensayos a elección', detalle: 'Varios ensayos y los cursos que elijas: tabla curso por ensayo, evolución, ejes y alertas' },
+    ],
+    docente: [
+      { id: 'A', nombre: 'A. Informe del curso', detalle: 'Un curso: resultados con la curva, ejes, preguntas, estudiantes que requieren apoyo y plan de acción' },
+      { id: 'B', nombre: 'B. Informe comparativo', detalle: 'Los cursos que elijas, lado a lado: curvas, ejes por curso, preguntas con brecha y recomendaciones' },
+      { id: 'C', nombre: 'C. Informe del curso y análisis de cada estudiante', detalle: 'El informe del curso más una ficha técnica por estudiante' },
+    ],
+  };
+  const modoInforme = (S) => (S.dest === 'directivo' ? 'dir' + (S.tipoDir || 'A') : S.dest === 'docente' ? 'doc' + (S.tipoDoc || 'A') : S.dest);
   const conHojasEn = (e, c) => Object.keys(hojasDe(e, c)).length > 0;
   const enRango = (e, S) => { const f = Estad.fechaOrden(e); return (!S.desde || f >= S.desde) && (!S.hasta || f <= S.hasta); };
 
@@ -1280,6 +1292,9 @@
   }
   function datosInformes() {
     const S = estadoInformes();
+    if (S.dest === 'ensayo') { S.dest = 'directivo'; S.tipoDir = 'A'; }
+    if (S.dest === 'directivo' && !S.tipoDir) S.tipoDir = 'C';
+    if (S.dest === 'docente' && !S.tipoDoc) S.tipoDoc = S.fichas ? 'C' : 'A';
     const conDatos = ensayos().filter((e) => cursos().some((c) => conHojasEn(e, c)));
     const asigs = [...new Set(conDatos.map((e) => Estad.grupoEnsayo(e)))];
     if (!asigs.includes(S.asig)) S.asig = asigs[0] || null;
@@ -1368,100 +1383,135 @@
     const { S, asigs, delGrupo, ens, delNivel, curDoc } = datosInformes();
     if (!ens) return `<div class="pantalla">${cabecera('Informes y análisis', '')}<div class="cuerpo"><div class="tarjeta vacio">Cuando tengas hojas corregidas podrás generar aquí los informes.</div></div>${nav('')}</div>`;
     const guardadas = config().informesGuardados || [];
-    const paso = (n, t, cuerpo) => `<section class="tarjeta pad paso-inf"><span class="etiqueta"><b class="num">${n}</b> ${h(t)}</span>${cuerpo}</section>`;
+    const modo = modoInforme(S);
+    let n = 0;
+    const paso = (t, cuerpo) => `<section class="tarjeta pad paso-inf"><span class="etiqueta"><b class="num">${++n}</b> ${h(t)}</span>${cuerpo}</section>`;
     const chip = (accion, a, on, texto) => `<button data-accion="${accion}" data-a="${h(a)}" aria-pressed="${on}">${h(texto)}</button>`;
     const opcion = (accion, a, on, titulo, sub, extra = '') => `<button class="opcion" data-accion="${accion}" data-a="${h(a)}" aria-pressed="${on}"><span class="caja">${on ? ICONO.check : ''}</span><span class="principal"><b>${h(titulo)}</b>${sub ? `<span>${h(sub)}</span>` : ''}</span>${extra}</button>`;
+    const interruptor = (accion, on, titulo, sub) => `<div class="lista-elegir"><button class="opcion" data-accion="${accion}" aria-pressed="${on}"><span class="caja">${on ? ICONO.check : ''}</span><span class="principal"><b>${h(titulo)}</b><span>${h(sub)}</span></span></button></div>`;
     const individual = ['estudiante', 'apoderado', 'completo'].includes(S.dest);
-    // Paso 5: opciones según destinatario
-    let opciones = '';
-    const conEst = curDoc ? curDoc.estudiantes.filter((e) => ensayos().some((x) => hojasDe(x, curDoc)[e.id])) : [];
+    const cursosSel = S.cursos.map((id) => Almacen.obtener('cursos', id)).filter(Boolean);
+    const pasoEnsayo = () => paso('Ensayo', `<div class="lista-elegir">${delGrupo.map((e) => opcion('inf-ens', e.id, e.id === S.ens, e.nombre, [e.fecha, `${cursos().filter((c) => conHojasEn(e, c)).length} cursos con hojas`].filter(Boolean).join(' · '))).join('')}</div>`);
+    const chipsNivel = () => { const nvs = [...new Set(cursos().filter((c) => conHojasEn(ens, c)).map((c) => nombreNivel(c)))]; return nvs.length > 1 ? `<div class="filtros">${nvs.map((x) => chip('inf-nivel', x, x === S.nivel, x)).join('')}</div>` : ''; };
+    const pasoCurso = () => paso('Curso', `${chipsNivel()}<span class="nota">Elige el curso del informe.</span>
+        <div class="filtros">${delNivel.map((c) => chip('inf-curso-doc', c.id, c.id === S.cursoDoc, c.nombre)).join('')}</div>`);
+    const pasoCursosNivel = (nota) => paso('Nivel y cursos', `${chipsNivel()}<span class="nota">${h(nota)}</span>
+        <div class="filtros">${delNivel.map((c) => chip('inf-curso', c.id, S.cursos.includes(c.id), c.nombre)).join('')}</div>`);
+
+    // Estudiante y apoderado: el ensayo elegido y, si se pide, más ensayos rendidos
+    let opcionesEst = '', conEst = [];
     if (individual && curDoc) {
+      const masEns = S.dest === 'completo' || !!S.masEns;
+      conEst = curDoc.estudiantes.filter((e) => (masEns ? ensayos().some((x) => hojasDe(x, curDoc)[e.id]) : hojasDe(ens, curDoc)[e.id]));
       if (!S.todos && !conEst.some((e) => e.id === S.est)) S.est = conEst[0] ? conEst[0].id : null;
-      const ref = S.todos ? conEst[0] : conEst.find((e) => e.id === S.est);
-      const disponibles = ref ? (S.todos ? [...new Map(conEst.flatMap((e) => ensayosEst(curDoc, e.id, S)).map((x) => [x.id, x])).values()].sort((a, b) => Estad.fechaOrden(a).localeCompare(Estad.fechaOrden(b))) : ensayosEst(curDoc, ref.id, S)) : [];
-      if (!S.ensayosEst) S.ensayosEst = disponibles.filter((e) => Estad.grupoEnsayo(e) === S.asig).map((e) => e.id);
-      S.ensayosEst = S.ensayosEst.filter((id) => disponibles.some((e) => e.id === id));
-      const ejes = [...new Set(disponibles.filter((e) => S.ensayosEst.includes(e.id)).flatMap((e) => e.preguntas.filter((p) => !p.piloto).map((p) => p.eje || 'Sin dato')))];
-      if (S.ejes) S.ejes = S.ejes.filter((x) => ejes.includes(x));
-      opciones += `<label class="campo" for="inf-est">Estudiante<select id="inf-est" data-cambio="inf-est">
+      opcionesEst += `<label class="campo" for="inf-est">Estudiante<select id="inf-est" data-cambio="inf-est">
           <option value="__todos" ${S.todos ? 'selected' : ''}>Todos los estudiantes del curso (${conEst.length})</option>
-          ${conEst.map((e) => `<option value="${h(e.id)}" ${!S.todos && e.id === S.est ? 'selected' : ''}>${e.lista}. ${h(e.nombre)}</option>`).join('')}</select></label>
-        <div class="dos"><label class="campo" for="inf-desde">Desde<input type="date" id="inf-desde" data-cambio="inf-desde" value="${h(S.desde)}"></label>
+          ${conEst.map((e) => `<option value="${h(e.id)}" ${!S.todos && e.id === S.est ? 'selected' : ''}>${e.lista}. ${h(e.nombre)}</option>`).join('')}</select></label>`;
+      if (S.dest !== 'completo') opcionesEst += interruptor('inf-mas-ens', masEns, 'Incluir más ensayos rendidos', `Sin esta opción, el informe es solo de ${ens.nombre}. Con ella, puedes sumar otros ensayos del período y ver la evolución.`);
+      if (!masEns) S.ensayosEst = [ens.id];
+      else {
+        const ref = S.todos ? conEst[0] : conEst.find((e) => e.id === S.est);
+        const disponibles = ref ? (S.todos ? [...new Map(conEst.flatMap((e) => ensayosEst(curDoc, e.id, S)).map((x) => [x.id, x])).values()].sort((a, b) => Estad.fechaOrden(a).localeCompare(Estad.fechaOrden(b))) : ensayosEst(curDoc, ref.id, S)) : [];
+        if (!S.ensayosEst) S.ensayosEst = disponibles.filter((e) => Estad.grupoEnsayo(e) === S.asig).map((e) => e.id);
+        S.ensayosEst = S.ensayosEst.filter((id) => disponibles.some((e) => e.id === id));
+        const ejes = [...new Set(disponibles.filter((e) => S.ensayosEst.includes(e.id)).flatMap((e) => e.preguntas.filter((p) => !p.piloto).map((p) => p.eje || 'Sin dato')))];
+        if (S.ejes) S.ejes = S.ejes.filter((x) => ejes.includes(x));
+        opcionesEst += `<div class="dos"><label class="campo" for="inf-desde">Desde<input type="date" id="inf-desde" data-cambio="inf-desde" value="${h(S.desde)}"></label>
         <label class="campo" for="inf-hasta">Hasta<input type="date" id="inf-hasta" data-cambio="inf-hasta" value="${h(S.hasta)}"></label></div>
         <span class="nota">Ensayos ${S.todos ? 'del curso' : 'que rindió'} en el período. Puedes mezclar asignaturas: cada instrumento se informa por separado, con su escala.</span>
         <div class="filtros"><button data-accion="inf-ens-grupo" data-a="todos">Todos</button><button data-accion="inf-ens-grupo" data-a="asig">Solo ${h(S.asig)}</button><button data-accion="inf-ens-grupo" data-a="ninguno">Ninguno</button></div>
         <div class="lista-elegir">${disponibles.map((e) => opcion('inf-ens-est', e.id, S.ensayosEst.includes(e.id), e.nombre, [e.asignatura, e.fecha, `${e.preguntas.filter((p) => !p.piloto).length} preguntas`].filter(Boolean).join(' · '))).join('') || '<span class="nota">No hay ensayos en ese período.</span>'}</div>
         ${ejes.length > 1 ? `<span class="etiqueta">Temáticas</span><div class="filtros">${chip('inf-eje', '__todas', !S.ejes, 'Todas')}${ejes.map((x) => chip('inf-eje', x, !!S.ejes && S.ejes.includes(x), x)).join('')}</div>` : ''}`;
+      }
     }
-    if ((S.dest === 'docente' || S.dest === 'completo') && delNivel.length > 1) {
-      opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-comparar" aria-pressed="${!!S.comparar}"><span class="caja">${S.comparar ? ICONO.check : ''}</span><span class="principal"><b>Agregar comparación con otros cursos</b><span>Suma al final del informe una sección que compara ${h(curDoc ? curDoc.nombre : 'el curso')} con los cursos que marques. Sin esta opción, el informe es solo del curso.</span></span></button></div>`;
-      if (S.comparar) opciones += `<span class="etiqueta">Cursos para comparar</span><div class="filtros">${delNivel.filter((c) => !curDoc || c.id !== curDoc.id).map((c) => chip('inf-curso', c.id, S.cursos.includes(c.id), c.nombre)).join('')}</div>`;
+
+    // Pasos según el informe
+    let pasos = '';
+    if (modo === 'dirC') {
+      const D2 = seleccionDirectiva(S, delGrupo);
+      pasos += paso('Ensayos', `<span class="nota">Marca los ensayos de ${h(S.asig)} que quieres incluir. Por defecto van todos.</span>
+          <div class="filtros"><button data-accion="inf-dir-ens-todos" data-a="todos">Todos</button><button data-accion="inf-dir-ens-todos" data-a="ultimo">Solo el más reciente</button></div>
+          <div class="lista-elegir">${delGrupo.map((e) => opcion('inf-dir-ens', e.id, D2.ensSel.some((x) => x.id === e.id), e.nombre, [e.fecha, `${cursos().filter((c) => conHojasEn(e, c)).length} cursos con hojas`].filter(Boolean).join(' · '))).join('')}</div>`);
+      pasos += paso('Cursos', `<span class="nota">Todos los cursos que rindieron los ensayos marcados${[...new Set(D2.disponibles.map((c) => nombreNivel(c)))].length > 1 ? ', de todos los niveles' : ''}. Quita los que no quieras incluir.</span>
+          <div class="filtros">${D2.disponibles.map((c) => chip('inf-dir-curso', c.id, D2.cursosSel.some((x) => x.id === c.id), c.nombre)).join('')}</div>`);
+      pasos += paso('Opciones', interruptor('inf-dir-detalle', !!S.detalleDir, 'Incluir el detalle de cada ensayo', 'Agrega, después del resumen, el informe completo de cada ensayo por nivel. Sin esta opción, el informe queda en pocas páginas.') + '<span class="nota">El informe directivo no incluye nombres de estudiantes.</span>');
+    } else if (modo === 'dirA') {
+      const CE = cursosDelEnsayo(S, ens);
+      pasos += pasoEnsayo();
+      pasos += paso('Cursos', `<span class="nota">Todos los cursos que rindieron ${h(ens.nombre)}${[...new Set(CE.disponibles.map((c) => nombreNivel(c)))].length > 1 ? ', de todos los niveles' : ''}. Quita los que no quieras incluir.</span>
+        <div class="filtros">${CE.disponibles.map((c) => chip('inf-ens-curso', c.id, CE.sel.some((x) => x.id === c.id), c.nombre)).join('')}</div>`);
+      pasos += paso('Opciones', interruptor('inf-ens-nomina', S.nominaEns !== false, 'Incluir la nómina de cada curso', 'Una tabla por curso con cada estudiante: correctas, logro, puntaje o nota y nivel. Sin esta opción, el informe no lleva nombres de estudiantes.'));
+    } else if (modo === 'dirB') {
+      pasos += pasoEnsayo() + pasoCursosNivel('Van todos los cursos del nivel que rindieron el ensayo. Quita los que no quieras incluir.');
+    } else if (modo === 'docB') {
+      pasos += pasoEnsayo() + pasoCursosNivel('Marca los cursos que quieres comparar (al menos dos).');
+    } else if (modo === 'docA' || modo === 'docC') {
+      pasos += pasoEnsayo() + pasoCurso();
+    } else {
+      pasos += pasoEnsayo() + pasoCurso();
+      let op = opcionesEst;
+      if (S.dest === 'completo') {
+        if (delNivel.length > 1) {
+          op += interruptor('inf-comparar', !!S.comparar, 'Agregar comparación con otros cursos', `Suma una sección que compara ${curDoc ? curDoc.nombre : 'el curso'} con los cursos que marques. Sin esta opción, el informe es solo del curso.`);
+          if (S.comparar) op += `<span class="etiqueta">Cursos para comparar</span><div class="filtros">${delNivel.filter((c) => !curDoc || c.id !== curDoc.id).map((c) => chip('inf-curso', c.id, S.cursos.includes(c.id), c.nombre)).join('')}</div>`;
+        }
+        op += interruptor('inf-fichas', !!S.fichas, 'Incluir fichas técnicas de cada estudiante', 'Agrega una página por estudiante, con su lugar en el curso y su análisis técnico.');
+      }
+      if (op) pasos += paso(S.dest === 'completo' ? 'Opciones' : 'Estudiante y ensayos', op);
     }
-    if (S.dest === 'docente' || S.dest === 'completo') opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-fichas" aria-pressed="${S.fichas}"><span class="caja">${S.fichas ? ICONO.check : ''}</span><span class="principal"><b>Incluir fichas técnicas de cada estudiante</b><span>Agrega una página por estudiante, con su lugar en el curso y su análisis técnico.</span></span></button></div>`;
-    if (S.dest === 'ensayo') opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-ens-nomina" aria-pressed="${S.nominaEns !== false}"><span class="caja">${S.nominaEns !== false ? ICONO.check : ''}</span><span class="principal"><b>Incluir la nómina de cada curso</b><span>Una tabla por curso con cada estudiante: correctas, logro, ${'puntaje o nota'} y nivel. Sin esta opción, el informe no lleva nombres de estudiantes.</span></span></button></div>`;
-    if (S.dest === 'directivo') opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-dir-detalle" aria-pressed="${!!S.detalleDir}"><span class="caja">${S.detalleDir ? ICONO.check : ''}</span><span class="principal"><b>Incluir el detalle de cada ensayo</b><span>Agrega, después del resumen, los indicadores completos de cada ensayo por nivel. Sin esta opción, el informe queda en 2 o 3 páginas.</span></span></button></div>
-      <span class="nota">El informe directivo no incluye nombres de estudiantes.</span>`;
-    // Paso 6: vista previa
-    const cursosSel = S.cursos.map((id) => Almacen.obtener('cursos', id)).filter(Boolean);
+
+    // Vista previa
     let previa = '';
     try {
       if (individual && curDoc && (S.est || S.todos)) {
         const est = S.todos ? null : curDoc.estudiantes.find((e) => e.id === S.est);
         if (est) {
           const cs = contextoEstudiante(curDoc, est, S), C2 = Estad.consolidar(est.id, cs.sel, S.ejes);
-          previa += `<span class="nota">${h(corto(est.nombre))}: ${cs.sel.length} ensayo${cs.sel.length === 1 ? '' : 's'} seleccionado${cs.sel.length === 1 ? '' : 's'}${S.ejes ? `, temáticas: ${h(S.ejes.join(', '))}` : ''}.</span>
+          previa += `<span class="nota">${h(Estad.nombres(est.nombre).corto)}: ${cs.sel.length} ensayo${cs.sel.length === 1 ? '' : 's'} seleccionado${cs.sel.length === 1 ? '' : 's'}${S.ejes ? `, temáticas: ${h(S.ejes.join(', '))}` : ''}.</span>
             <div class="tabla-mini"><table><thead><tr><th>Instrumento</th><th class="num">Ensayos</th><th class="num">Correctas</th><th class="num">Logro</th></tr></thead><tbody>
             ${C2.map((g) => `<tr><td class="ajusta">${h(g.nombre)}</td><td class="num">${g.cantidad}</td><td class="num">${g.correctas}/${g.preguntas}</td><td class="num">${pct(g.logro)}</td></tr>`).join('') || '<tr><td colspan="4">Sin datos para esa selección</td></tr>'}</tbody></table></div>`;
-        } else previa += `<span class="nota">Se generará un informe por cada uno de los ${conEst.length} estudiantes con los ensayos marcados.</span>`;
+        } else previa += `<span class="nota">Se generará un informe por cada uno de los ${conEst.length} estudiantes, en un solo PDF.</span>`;
       }
-      if (S.dest === 'directivo') {
+      if (modo === 'dirC') {
         const M2 = contextoDirectivoVarios(S, delGrupo);
         const ev = M2.bloques.reduce((a, b) => a + b.inst.resumen.corregidas, 0), media = ev ? M2.bloques.reduce((a, b) => a + b.inst.resumen.media * b.inst.resumen.corregidas, 0) / ev : 0;
         const ncur = new Set(M2.bloques.flatMap((b) => b.porCurso.map((x) => x.curso.id))).size;
         previa += `<div class="cifras cuatro"><div class="tarjeta"><span>Ensayos</span><b class="num">${M2.ensayos.length}</b></div><div class="tarjeta"><span>Cursos</span><b class="num">${ncur}</b></div>
           <div class="tarjeta"><span>Hojas corregidas</span><b class="num">${ev}</b></div><div class="tarjeta"><span>Logro promedio</span><b class="num">${pct(media)}</b></div></div>
-          <span class="nota">${M2.bloques.length > 1 ? `Resumen de todos los cursos y ensayos: tabla curso por ensayo, participación, evolución, ejes y alertas.${S.detalleDir ? ` Después, el detalle de cada ensayo por nivel (${M2.bloques.length} secciones).` : ''}` : 'Un solo ensayo y un nivel: se genera el informe directivo de ese ensayo.'}</span>`;
+          <span class="nota">${M2.bloques.length > 1 ? `Resumen de todos los cursos y ensayos: tabla curso por ensayo, participación, curva, evolución, ejes y alertas.${S.detalleDir ? ` Después, el detalle de cada ensayo por nivel (${M2.bloques.length} secciones).` : ''}` : 'Un solo ensayo y un nivel: se genera el informe directivo de ese ensayo.'}</span>`;
       } else if (!individual || S.dest === 'completo') {
-        const D = S.dest === 'ensayo' ? contextoEnsayo(S, ens) : contextoDirectivo(ens, cursosComparados(S, curDoc), S.nivel), R = D.inst.resumen, al = Informe.vistaPrevia(D).alertas;
+        const D = modo === 'dirA' ? contextoEnsayo(S, ens) : modo === 'dirB' || modo === 'docB' ? contextoDirectivo(ens, cursosSel, S.nivel) : contextoDirectivo(ens, cursosComparados(S, curDoc), S.nivel);
+        const R = D.inst.resumen, al = Informe.vistaPrevia(D).alertas;
         previa += `<div class="cifras cuatro"><div class="tarjeta"><span>Evaluados</span><b class="num">${R.corregidas}<span style="font-size:14px">/${R.total}</span></b></div>
-          <div class="tarjeta"><span>Participación</span><b class="num">${pct(R.participacion)}</b></div><div class="tarjeta"><span>Logro promedio</span><b class="num">${pct(R.media)}</b></div>
+          <div class="tarjeta"><span>Participación</span><b class="num">${pct(R.participacion)}</b></div><div class="tarjeta"><span>${R.puntajeMedia != null ? 'Puntaje promedio' : 'Logro promedio'}</span><b class="num">${R.puntajeMedia != null ? R.puntajeMedia : pct(R.media)}</b></div>
           <div class="tarjeta"><span>Alertas</span><b class="num">${al.length}</b></div></div>
           ${D.porCurso.length >= 2 ? `<div class="tabla-mini"><table><thead><tr><th>Curso</th><th class="num">Evaluados</th><th class="num">Promedio</th><th class="num">Dif.</th></tr></thead><tbody>${D.porCurso.map((x) => `<tr><td>${h(x.curso.nombre)}</td><td class="num">${x.A.resumen.corregidas}/${x.A.resumen.total}</td><td class="num">${pct(x.A.resumen.media)}</td><td class="num">${Math.round((x.A.resumen.media - R.media) * 100)} pp</td></tr>`).join('')}</tbody></table></div>` : ''}
+          ${modo === 'docB' && D.porCurso.length < 2 ? '<div class="aviso rev">' + ICONO.alerta + '<span>Marca al menos dos cursos con hojas corregidas para comparar.</span></div>' : ''}
           ${D.validacion.errores.length ? `<div class="aviso mal">${ICONO.alerta}<span><b>Problemas en los datos:</b> ${h(D.validacion.errores.join(' '))}</span></div>` : ''}
           ${D.validacion.avisos.length ? `<div class="aviso rev">${ICONO.alerta}<span>${h(D.validacion.avisos.join(' '))}</span></div>` : ''}`;
       }
     } catch (e) { console.error(e); previa = `<span class="nota">No se pudo calcular la vista previa: ${h(e.message)}</span>`; }
+    const tipos = TIPOS[S.dest];
+    const tipoSel = S.dest === 'directivo' ? S.tipoDir : S.tipoDoc;
     return `<div class="pantalla">${cabecera('Informes y análisis', 'Resultados para cada destinatario')}<div class="cuerpo informes">
       ${guardadas.length ? `<section class="tarjeta pad"><span class="etiqueta">Configuraciones guardadas</span><div class="filtros">${guardadas.map((g, i) => `<button data-accion="inf-cargar" data-a="${i}">${h(g.nombre)}</button>`).join('')}</div>
         <button class="btn-texto" data-accion="inf-borrar-guardadas">Borrar las configuraciones guardadas</button></section>` : ''}
-      ${paso(1, 'Tipo de evaluación', `<div class="filtros">${asigs.map((a) => chip('inf-asig', a, a === S.asig, a)).join('')}</div>`)}
-      ${S.dest === 'directivo' ? (() => {
-        const D2 = seleccionDirectiva(S, delGrupo);
-        return paso(2, 'Ensayos', `<span class="nota">Marca los ensayos de ${h(S.asig)} que quieres incluir. Por defecto van todos.</span>
-          <div class="filtros"><button data-accion="inf-dir-ens-todos" data-a="todos">Todos</button><button data-accion="inf-dir-ens-todos" data-a="ultimo">Solo el más reciente</button></div>
-          <div class="lista-elegir">${delGrupo.map((e) => opcion('inf-dir-ens', e.id, D2.ensSel.some((x) => x.id === e.id), e.nombre, [e.fecha, `${cursos().filter((c) => conHojasEn(e, c)).length} cursos con hojas`].filter(Boolean).join(' · '))).join('')}</div>`)
-          + paso(3, 'Cursos', `<span class="nota">Todos los cursos que rindieron los ensayos marcados${[...new Set(D2.disponibles.map((c) => nombreNivel(c)))].length > 1 ? ', de todos los niveles' : ''}. Quita los que no quieras incluir.</span>
-          <div class="filtros">${D2.disponibles.map((c) => chip('inf-dir-curso', c.id, D2.cursosSel.some((x) => x.id === c.id), c.nombre)).join('')}</div>`);
-      })() : ''}
-      ${S.dest === 'directivo' ? '' : paso(2, 'Ensayo', `<div class="lista-elegir">${delGrupo.map((e) => opcion('inf-ens', e.id, e.id === S.ens, e.nombre, [e.fecha, `${cursos().filter((c) => conHojasEn(e, c)).length} cursos con hojas`].filter(Boolean).join(' · '))).join('')}</div>`)}
-      ${S.dest === 'ensayo' ? (() => { const CE = cursosDelEnsayo(S, ens); return paso(3, 'Cursos', `<span class="nota">Todos los cursos que rindieron ${h(ens.nombre)}${[...new Set(CE.disponibles.map((c) => nombreNivel(c)))].length > 1 ? ', de todos los niveles' : ''}. Quita los que no quieras incluir.</span>
-        <div class="filtros">${CE.disponibles.map((c) => chip('inf-ens-curso', c.id, CE.sel.some((x) => x.id === c.id), c.nombre)).join('')}</div>`); })() : ''}
-      ${S.dest === 'directivo' || S.dest === 'ensayo' ? '' : paso(3, 'Curso', `${(() => { const nvs = [...new Set(cursos().filter((c) => conHojasEn(ens, c)).map((c) => nombreNivel(c)))]; return nvs.length > 1 ? `<div class="filtros">${nvs.map((n) => chip('inf-nivel', n, n === S.nivel, n)).join('')}</div>` : ''; })()}
-        <span class="nota">Elige el curso del informe.</span>
-        <div class="filtros">${delNivel.map((c) => chip('inf-curso-doc', c.id, c.id === S.cursoDoc, c.nombre)).join('')}</div>`)}
-      ${paso(4, 'Destinatario', `<div class="lista-elegir">${DESTINOS.map((d) => opcion('inf-dest', d.id, d.id === S.dest, d.nombre, d.detalle)).join('')}</div>`)}
-      ${opciones ? paso(5, 'Opciones', opciones) : ''}
-      ${paso(opciones ? 6 : 5, 'Vista previa', previa || '<span class="nota">Elige las opciones de arriba.</span>')}
+      ${paso('¿Para quién es el informe?', `<div class="lista-elegir">${DESTINOS.map((d) => opcion('inf-dest', d.id, d.id === S.dest, d.nombre, d.detalle)).join('')}</div>`)}
+      ${tipos ? paso('Tipo de informe', `<div class="lista-elegir">${tipos.map((t) => opcion('inf-tipo', t.id, t.id === tipoSel, t.nombre, t.detalle)).join('')}</div>`) : ''}
+      ${paso('Tipo de evaluación', `<div class="filtros">${asigs.map((a) => chip('inf-asig', a, a === S.asig, a)).join('')}</div>`)}
+      ${pasos}
+      ${paso('Vista previa', previa || '<span class="nota">Elige las opciones de arriba.</span>')}
       <button class="btn primario grande" data-accion="inf-generar">${ICONO.bajar} Generar PDF</button>
       ${(S.dest === 'estudiante' || S.dest === 'apoderado') && curDoc ? `<button class="btn grande cta" data-accion="inf-enviar">✉ Enviar por correo a cada ${S.dest === 'apoderado' ? 'apoderado' : 'estudiante'} de ${h(curDoc.nombre)}</button>
-      <span class="nota">Cada uno recibe su propio informe, con los ensayos${S.ejes ? ' y temáticas' : ''} que elegiste arriba.</span>` : ''}
+      <span class="nota">Cada uno recibe su propio informe, con ${S.masEns ? `los ensayos${S.ejes ? ' y temáticas' : ''} que elegiste arriba` : `el ensayo ${h(ens.nombre)}`}.</span>` : ''}
       <div class="fila-guardar"><input id="inf-nombre" placeholder="Nombre de la configuración, ej.: II medio M1 directivo"><button class="btn" data-accion="inf-guardar">Guardar</button></div>
     </div>${nav('')}</div>`;
   }
 
   async function generarInformeModulo() {
-    const { S, ens, curDoc } = datosInformes();
+    const { S, ens, curDoc, delGrupo } = datosInformes();
     if (!ens) return;
+    const modo = modoInforme(S);
     const cursosSel = S.cursos.map((id) => Almacen.obtener('cursos', id)).filter(Boolean);
     toast('Preparando el informe…');
     try {
@@ -1471,18 +1521,29 @@
         return lista.map((e) => contextoEstudiante(curDoc, e, S)).filter((c) => c.sel.length);
       };
       let blob, archivo;
-      if (S.dest === 'directivo') {
-        const M2 = contextoDirectivoVarios(S, datosInformes().delGrupo);
+      if (modo === 'dirC') {
+        const M2 = contextoDirectivoVarios(S, delGrupo);
         if (!M2.bloques.length) { toast('No hay hojas corregidas para esa selección.'); return; }
         if (M2.bloques.length === 1) { blob = Informe.directivo(M2.bloques[0]); archivo = `informe_directivo_${nombre(M2.bloques[0].nivel || 'cursos')}_${nombre(M2.bloques[0].ens.nombre)}.pdf`; }
         else { M2.detalle = !!S.detalleDir; blob = Informe.directivoConsolidado(M2, { detalle: M2.detalle }); archivo = `informe_directivo_${nombre(S.asig || 'ensayos')}_${M2.ensayos.length}_ensayos.pdf`; }
-      } else if (S.dest === 'ensayo') {
+      } else if (modo === 'dirA') {
         const D = contextoEnsayo(S, ens);
         if (!D.porCurso.length) { toast('No hay hojas corregidas de ese ensayo.'); return; }
         blob = Informe.ensayoCursos(D, { nomina: S.nominaEns !== false });
-        archivo = `informe_ensayo_${nombre(ens.nombre)}_${D.porCurso.length}_cursos.pdf`;
-      } else if (S.dest === 'docente') {
-        blob = Informe.docente(contextoDocente(ens, curDoc, cursosComparados(S, curDoc)), { fichas: S.fichas });
+        archivo = `informe_directivo_${nombre(ens.nombre)}_${D.porCurso.length}_cursos.pdf`;
+      } else if (modo === 'dirB') {
+        const D = contextoDirectivo(ens, cursosSel, S.nivel);
+        if (!D.porCurso.length) { toast('No hay hojas corregidas para esos cursos.'); return; }
+        blob = Informe.directivo(D);
+        archivo = `informe_directivo_${nombre(S.nivel || 'nivel')}_${nombre(ens.nombre)}.pdf`;
+      } else if (modo === 'docB') {
+        const D = contextoDirectivo(ens, cursosSel, S.nivel);
+        if (D.porCurso.length < 2) { toast('Marca al menos dos cursos con hojas corregidas para comparar.'); return; }
+        blob = Informe.comparativo(D);
+        archivo = `informe_comparativo_${nombre(S.nivel || 'cursos')}_${nombre(ens.nombre)}.pdf`;
+      } else if (modo === 'docA' || modo === 'docC') {
+        if (!curDoc) return;
+        blob = Informe.docente(contextoDocente(ens, curDoc, [curDoc]), { fichas: modo === 'docC' });
         archivo = `informe_docente_${nombre(curDoc.nombre)}_${nombre(ens.nombre)}.pdf`;
       } else if (S.dest === 'completo') {
         blob = Informe.completo({ dir: contextoDirectivo(ens, cursosComparados(S, curDoc), S.nivel), doc: contextoDocente(ens, curDoc, cursosComparados(S, curDoc)), estudiantes: estudiantesSel(), fichas: S.fichas });
@@ -2250,7 +2311,9 @@
     'inf-curso': (a) => { const S = estadoInformes(); S.cursos = S.cursos.includes(a) ? S.cursos.filter((x) => x !== a) : [...S.cursos, a]; if (!S.cursos.length) S.cursos = [a]; E.mantenerScroll = true; render(); },
     'inf-comparar': () => { const S = estadoInformes(); S.comparar = !S.comparar; if (S.comparar) S.cursos = datosInformes().delNivel.map((c) => c.id); E.mantenerScroll = true; render(); },
     'inf-curso-doc': (a) => { const S = estadoInformes(); S.cursoDoc = a; S.est = null; S.ensayosEst = null; E.mantenerScroll = true; render(); },
-    'inf-dest': (a) => { estadoInformes().dest = a; E.mantenerScroll = true; render(); },
+    'inf-dest': (a) => { const S = estadoInformes(); S.dest = a; if (a === 'directivo') S.tipoDir = S.tipoDir || 'A'; if (a === 'docente') S.tipoDoc = S.tipoDoc || 'A'; S.ensayosEst = null; E.mantenerScroll = true; render(); },
+    'inf-tipo': (a) => { const S = estadoInformes(); if (S.dest === 'directivo') S.tipoDir = a; else S.tipoDoc = a; if (a === 'B') S.cursos = datosInformes().delNivel.map((c) => c.id); E.mantenerScroll = true; render(); },
+    'inf-mas-ens': () => { const S = estadoInformes(); S.masEns = !S.masEns; S.ensayosEst = null; S.ejes = null; E.mantenerScroll = true; render(); },
     'inf-fichas': () => { const S = estadoInformes(); S.fichas = !S.fichas; E.mantenerScroll = true; render(); },
     'inf-ens-est': (a) => { const S = estadoInformes(); S.ensayosEst = (S.ensayosEst || []).includes(a) ? S.ensayosEst.filter((x) => x !== a) : [...(S.ensayosEst || []), a]; E.mantenerScroll = true; render(); },
     'inf-ens-grupo': (a) => {

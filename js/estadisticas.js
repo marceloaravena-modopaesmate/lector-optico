@@ -34,11 +34,13 @@ const Estad = (() => {
   const APELLIDOS = new Set(('gonzalez munoz rojas diaz perez soto contreras silva martinez sepulveda morales rodriguez lopez fuentes hernandez torres araya flores espinoza valenzuela castillo tapia reyes gutierrez castro pizarro alvarez vasquez sanchez fernandez ramirez carrasco gomez cortes herrera nunez jara vergara rivera figueroa riquelme garcia miranda bravo vera molina vega campos sandoval orellana cardenas olivares alarcon gallardo ortiz garrido salazar guzman henriquez saavedra navarro aguilera parra romero aravena vargas vidal medina pino lagos mella caceres muñoz leiva cofre zuniga yanez poblete ruiz mendez rios toro alvarado salinas pena ponce paredes palma acuna jimenez venegas escobar cisternas troncoso salas gaete quezada bustos osorio carvajal donoso ibarra arancibia moreno farias ramos godoy diaz lara inostroza quiroz hidalgo meza mora navarrete orellana sole marin burgos cid aguilar sierra lillo correa mardones villalobos ulloa vallejos uribe barra benavides castro calderon espinosa gajardo maldonado mansilla montecinos naranjo neira oyarzun pavez pinto retamal rubio sanhueza toledo urrutia valdes valdebenito vasquez vivanco zamora').split(' '));
   let formatoNombre = 'auto';
   const titulo = (t) => (t === t.toUpperCase() ? t.toLowerCase().replace(/(^|[\s-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()) : t);
+  // pila: primer nombre · corto: primer nombre y primer apellido · completo: nombres y apellidos en orden normal
   function nombres(n) {
     const limpio = String(n || '').trim().replace(/\s+/g, ' ');
     if (limpio.includes(',')) {
       const [ap, no] = limpio.split(',').map((x) => titulo(x.trim()));
-      return { pila: (no || ap).split(' ')[0], completo: [no, ap].filter(Boolean).join(' ') };
+      const pila = (no || ap).split(' ')[0];
+      return { pila, corto: no ? `${pila} ${ap.split(' ')[0]}` : pila, completo: [no, ap].filter(Boolean).join(' ') };
     }
     const p = titulo(limpio).split(' ');
     let apellidoPrimero = formatoNombre === 'apellido';
@@ -46,9 +48,12 @@ const Estad = (() => {
       const es = (w) => APELLIDOS.has(sinTilde(w || ''));
       apellidoPrimero = (es(p[0]) + es(p[1])) > (es(p[p.length - 1]) + es(p[p.length - 2]));
     }
-    if (!apellidoPrimero || p.length < 2) return { pila: p[0] || '', completo: p.join(' ') };
+    if (!apellidoPrimero || p.length < 2) {
+      const corto = p.length >= 4 ? `${p[0]} ${p[p.length - 2]}` : p.length >= 2 ? `${p[0]} ${p[1]}` : p[0] || '';
+      return { pila: p[0] || '', corto, completo: p.join(' ') };
+    }
     const k = p.length >= 3 ? 2 : 1; // dos apellidos si hay al menos tres palabras
-    return { pila: p[k], completo: [...p.slice(k), ...p.slice(0, k)].join(' ') };
+    return { pila: p[k], corto: `${p[k]} ${p[0]}`, completo: [...p.slice(k), ...p.slice(0, k)].join(' ') };
   }
 
   function configurar(c) {
