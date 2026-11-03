@@ -156,30 +156,50 @@
 
   function pInicio() {
     const ens = ensayoActivo(), cur = cursoActivo();
+    const col = config().colegio || {};
+    const totalHojas = Almacen.lista('resultados').reduce((n, r) => n + Object.keys(r.hojas || {}).length, 0);
+    // Ilustración: una hoja de respuestas con una línea de lectura que la recorre
+    const hojaIlustrada = (() => {
+      const llenas = new Set([1, 6, 8, 15, 18, 22, 25, 31]);
+      let c = '';
+      for (let f = 0; f < 8; f++) for (let k = 0; k < 4; k++) {
+        const i = f * 4 + k, x = 22 + k * 15, y = 34 + f * 13;
+        c += llenas.has(i) ? `<circle cx="${x}" cy="${y}" r="4.6" class="b-llena"/>` : `<circle cx="${x}" cy="${y}" r="4.2" class="b-vacia"/>`;
+      }
+      return `<svg class="hoja-ilustrada" viewBox="0 0 92 150" aria-hidden="true">
+        <rect x="2" y="2" width="88" height="146" rx="9" class="h-papel"/>
+        <rect x="8" y="8" width="7" height="7" class="h-marca"/><rect x="77" y="8" width="7" height="7" class="h-marca"/><rect x="8" y="135" width="7" height="7" class="h-marca"/><rect x="77" y="135" width="7" height="7" class="h-marca"/>
+        <rect x="22" y="10" width="44" height="5" rx="2.5" class="h-linea"/>${c}
+        <g class="h-escaner"><rect x="4" y="0" width="84" height="16" class="h-brillo"/><rect x="4" y="15" width="84" height="2" rx="1" class="h-rayo"/></g>
+      </svg>`;
+    })();
+    const logo = '<svg class="logo-app" viewBox="0 0 48 48" aria-hidden="true"><rect x="10" y="6" width="28" height="36" rx="4" fill="#fff"/><g fill="#1A4080"><circle cx="24" cy="15" r="2.6"/><circle cx="31" cy="22" r="2.6"/><circle cx="17" cy="29" r="2.6"/><circle cx="24" cy="35" r="2.6"/></g><g fill="none" stroke="#1A4080" stroke-width="1.3"><circle cx="17" cy="15" r="2.3"/><circle cx="31" cy="15" r="2.3"/><circle cx="17" cy="22" r="2.3"/><circle cx="24" cy="22" r="2.3"/><circle cx="24" cy="29" r="2.3"/><circle cx="31" cy="29" r="2.3"/><circle cx="17" cy="35" r="2.3"/><circle cx="31" cy="35" r="2.3"/></g></svg>';
     let tarjeta;
     if (!ens || !cur) {
-      tarjeta = `<section class="destacado">
+      tarjeta = `<section class="tarjeta-inicio vacia">
         <span class="eyebrow">Para empezar</span>
         <span class="nombre">Crea un ensayo y carga tu curso</span>
         <span class="detalle">Necesitas la clave del ensayo y la lista del curso, ambas desde las plantillas Excel. También puedes probar la app con datos de ejemplo.</span>
-        <div class="fila-botones"><button class="btn" data-accion="ir" data-a="${!ens ? 'ensayo-nuevo' : 'cursos'}">${!ens ? 'Crear ensayo' : 'Cargar curso'}</button>
+        <div class="fila-botones"><button class="btn primario" data-accion="ir" data-a="${!ens ? 'ensayo-nuevo' : 'cursos'}">${!ens ? 'Crear ensayo' : 'Cargar curso'}</button>
         <button class="btn" data-accion="ejemplo">Usar ejemplo</button></div>
       </section>`;
     } else {
       const hojas = hojasDe(ens, cur);
-      const hechas = cur.estudiantes.filter((e) => hojas[e.id]).length;
-      const total = cur.estudiantes.length;
-      tarjeta = `<section class="destacado">
-        <div style="display:flex;flex-direction:column;gap:4px">
-          <span class="eyebrow">Ensayo en curso</span>
-          <span class="nombre">${h(ens.nombre)}</span>
-          <span class="detalle">${h(cur.nombre)} · ${ens.preguntas.length} preguntas${ens.fecha ? ' · ' + h(ens.fecha) : ''}</span>
+      const hechas = cur.estudiantes.filter((e) => hojas[e.id]).length, total = cur.estudiantes.length;
+      const fr = total ? hechas / total : 0, C = 2 * Math.PI * 30;
+      tarjeta = `<section class="tarjeta-inicio">
+        <div class="ti-fila">
+          <div class="anillo" role="img" aria-label="${hechas} de ${total} hojas corregidas">
+            <svg viewBox="0 0 72 72"><circle cx="36" cy="36" r="30" class="a-pista"/><circle cx="36" cy="36" r="30" class="a-valor" stroke-dasharray="${(fr * C).toFixed(1)} ${C.toFixed(1)}"/></svg>
+            <span><b class="num">${hechas}</b><small>de ${total}</small></span>
+          </div>
+          <div class="ti-texto">
+            <span class="eyebrow">Ensayo en curso</span>
+            <span class="nombre">${h(ens.nombre)}</span>
+            <span class="detalle">${h(cur.nombre)} · ${ens.preguntas.length} preguntas${ens.fecha ? ' · ' + h(ens.fecha) : ''}</span>
+          </div>
         </div>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <div style="display:flex;justify-content:space-between;font-size:13px"><span>Hojas corregidas</span><b class="num">${hechas} de ${total}</b></div>
-          <div class="progreso"><div style="width:${total ? (hechas / total) * 100 : 0}%"></div></div>
-        </div>
-        <button class="btn grande" data-accion="ir" data-a="camara">${ICONO.camara} Corregir hojas</button>
+        <button class="btn grande cta" data-accion="ir" data-a="camara">${ICONO.camara} Corregir hojas</button>
         <div class="dos">
           <label class="oculto-visual" for="sel-ensayo">Ensayo</label>
           <select id="sel-ensayo" data-cambio="ensayo">${ensayos().map((e) => `<option value="${h(e.id)}" ${e.id === ens.id ? 'selected' : ''}>${h(e.nombre)}</option>`).join('')}</select>
@@ -194,7 +214,7 @@
       const ult = cur.estudiantes.filter((e) => hojas[e.id]).sort((a, b) => hojas[b.id].fecha.localeCompare(hojas[a.id].fecha)).slice(0, 3);
       if (ult.length) {
         recientes = `<section style="display:flex;flex-direction:column;gap:10px">
-          <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 style="font-size:16px">Últimas corregidas</h2>
+          <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 class="titulo-seccion">Últimas corregidas</h2>
           <button class="btn" style="min-height:36px;border:0;background:none" data-accion="ir" data-a="curso">Ver todas</button></div>
           <div class="tarjeta lista">${ult.map((e) => {
             const r = hojas[e.id];
@@ -204,38 +224,37 @@
           }).join('')}</div></section>`;
       }
     }
-    // Portada: franja azul con el logo, el colegio y cifras generales
-    const col = config().colegio || {};
-    const totalHojas = Almacen.lista('resultados').reduce((n, r) => n + Object.keys(r.hojas || {}).length, 0);
-    const burbujas = (() => {
-      const llenas = new Set([1, 7, 8, 14, 18, 21, 27, 31, 34, 40]);
-      let c = '';
-      for (let f = 0; f < 6; f++) for (let k = 0; k < 7; k++) { const i = f * 7 + k; c += `<circle cx="${14 + k * 26}" cy="${14 + f * 26}" r="8" ${llenas.has(i) ? 'class="llena"' : ''}/>`; }
-      return `<svg class="portada-fondo" viewBox="0 0 182 156" aria-hidden="true">${c}</svg>`;
-    })();
-    const logo = '<svg class="logo-app" viewBox="0 0 48 48" aria-hidden="true"><rect x="9" y="5" width="30" height="38" rx="3" fill="#fff"/><g fill="#1A4080"><rect x="11" y="7" width="3" height="3"/><rect x="34" y="7" width="3" height="3"/><rect x="11" y="38" width="3" height="3"/><rect x="34" y="38" width="3" height="3"/></g><g fill="none" stroke="#1A4080" stroke-width="1.3"><circle cx="17" cy="15" r="2.4"/><circle cx="31" cy="15" r="2.4"/><circle cx="17" cy="22" r="2.4"/><circle cx="24" cy="22" r="2.4"/><circle cx="24" cy="29" r="2.4"/><circle cx="31" cy="29" r="2.4"/><circle cx="17" cy="35" r="2.4"/><circle cx="31" cy="35" r="2.4"/></g><g fill="#1A4080"><circle cx="24" cy="15" r="2.6"/><circle cx="31" cy="22" r="2.6"/><circle cx="17" cy="29" r="2.6"/><circle cx="24" cy="35" r="2.6"/></g></svg>';
-    const cifra = (n, t) => `<div><b class="num">${n}</b><span>${t}</span></div>`;
-    const tile = (accion, a, icono, tono, titulo, sub, ancho = false) => `<button data-accion="${accion}" data-a="${a}" class="${ancho ? 'ancho' : ''}"><span class="icono-tile tono-${tono}">${icono}</span><b>${titulo}</b><span>${sub}</span></button>`;
+    const tile = (accion, a, icono, tono, titulo, sub) => `<button data-accion="${accion}" data-a="${a}"><span class="icono-tile tono-${tono}">${icono}</span><b>${titulo}</b><span>${sub}</span></button>`;
     return `<div class="pantalla inicio">
-      <header class="portada">${burbujas}
+      <header class="portada">
         <div class="portada-fila">
           <div class="portada-marca">${logo}<div><span class="saludo">${saludo()}</span><span class="marca">Lector óptico</span></div></div>
           <button class="btn-redondo" data-accion="ir" data-a="ajustes" aria-label="Ajustes y respaldo">${ICONO.ajustes}</button>
         </div>
-        <p class="lema">Corrige ensayos PAES y SIMCE con la cámara y convierte los resultados en decisiones pedagógicas.</p>
+        <div class="portada-centro">
+          <div class="portada-titular">
+            <h1>Corrige.<br>Analiza.<br><em>Decide.</em></h1>
+            <p>Ensayos PAES y SIMCE corregidos con la cámara y convertidos en informes para cada destinatario.</p>
+          </div>
+          ${hojaIlustrada}
+        </div>
         ${col.nombre ? `<span class="portada-colegio">${col.logo ? `<img src="${col.logo.src}" alt="">` : ''}${h(col.nombre)}</span>` : ''}
-        ${ensayos().length || cursos().length ? `<div class="portada-cifras">${cifra(ensayos().length, ensayos().length === 1 ? 'ensayo' : 'ensayos')}${cifra(cursos().length, cursos().length === 1 ? 'curso' : 'cursos')}${cifra(totalHojas, 'hojas corregidas')}</div>` : ''}
+        ${ensayos().length || cursos().length ? `<div class="portada-cifras"><span><b class="num">${ensayos().length}</b> ${ensayos().length === 1 ? 'ensayo' : 'ensayos'}</span><span><b class="num">${cursos().length}</b> ${cursos().length === 1 ? 'curso' : 'cursos'}</span><span><b class="num">${totalHojas}</b> hojas</span></div>` : ''}
       </header>
       <div class="cuerpo">${avisoInstalar()}${tarjeta}
-        <h2 class="titulo-seccion">¿Qué quieres hacer?</h2>
+        <button class="destacado-informes" data-accion="ir" data-a="informes">
+          <span class="di-icono">${ICONO.informe}</span>
+          <span class="di-texto"><b>Informes y análisis</b><span>Directivo, docente, estudiante y apoderados en PDF</span></span>
+          <span class="di-flecha" aria-hidden="true">›</span>
+        </button>
+        <h2 class="titulo-seccion">Explorar</h2>
         <div class="mosaico">
-          ${tile('ir', 'informes', ICONO.informe, 1, 'Informes', 'Directivo, docente, estudiante y apoderados')}
-          ${tile('ir-tab', 'curso', ICONO.grafico, 2, 'Estadísticas', 'Curso, preguntas, estudiantes e historial')}
-          ${tile('ir', 'ensayos', ICONO.doc, 3, 'Ensayos', 'Claves, ejes y habilidades')}
-          ${tile('ir', 'cursos', ICONO.grupo, 4, 'Cursos', 'Listas y hojas con QR')}
-          ${tile('ir-tab', 'nivel', ICONO.grupo, 2, 'Paralelos', 'Compara los cursos del nivel')}
-          ${tile('ir-tab', 'alertas', ICONO.alerta, 5, 'Alertas', 'Estudiantes en riesgo y reforzamiento')}
-          ${tile('ir', 'colegio', ICONO.informe, 1, 'Colegio', 'Todos los niveles y asignaturas en un tablero', true)}
+          ${tile('ir-tab', 'curso', ICONO.grafico, 2, 'Estadísticas', 'Curso, preguntas y estudiantes')}
+          ${tile('ir-tab', 'nivel', ICONO.grupo, 3, 'Paralelos', 'Compara los cursos del nivel')}
+          ${tile('ir-tab', 'alertas', ICONO.alerta, 5, 'Alertas', 'Riesgo y reforzamiento')}
+          ${tile('ir', 'colegio', ICONO.informe, 1, 'Colegio', 'Todos los niveles')}
+          ${tile('ir', 'ensayos', ICONO.doc, 4, 'Ensayos', 'Claves, ejes y habilidades')}
+          ${tile('ir', 'cursos', ICONO.grupo, 6, 'Cursos', 'Listas y hojas con QR')}
         </div>${recientes}
       </div>${nav('inicio')}</div>`;
   }
