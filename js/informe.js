@@ -39,6 +39,7 @@ const Informe = (() => {
   function piePaginas(P) {
     const { doc } = P, n = doc.getNumberOfPages();
     for (let i = 1; i <= n; i++) {
+      if (P.sinPie && P.sinPie.has(i)) continue;
       doc.setPage(i);
       doc.setDrawColor(C.grid); doc.setLineWidth(0.3); doc.line(M, ALTO - M - 4, ANCHO - M, ALTO - M - 4);
       fuente(doc, 8, 'normal', C.texto2);
@@ -1390,7 +1391,7 @@ const Informe = (() => {
       'Promedio de los logros individuales: el promedio de los porcentajes de cada estudiante. Logro agregado: todas las respuestas correctas del grupo divididas por todas las respuestas esperadas. Con un mismo ensayo ambos coinciden; se informan por separado para no confundirlos.',
       'Desviación estándar y varianza son muestrales (dividen por n - 1). Los cuartiles se calculan por interpolación lineal, igual que CUARTIL.INC de Excel. La moda se informa solo si algún valor se repite.',
       `Niveles de desempeño: Bajo bajo ${pct(n.medio)}, Medio desde ${pct(n.medio)} y Alto desde ${pct(n.alto)} de logro. Son cortes configurables en Ajustes y no corresponden a los niveles oficiales de PAES ni de SIMCE.`,
-      tieneTabla ? 'Puntaje PAES estimado: se obtiene con la tabla de conversión (correctas → puntaje) cargada en el ensayo. No es el puntaje oficial del DEMRE.' : 'Este informe no estima puntajes PAES: el ensayo no tiene tabla de conversión cargada y la app no convierte porcentajes en puntajes por reglas arbitrarias.',
+      tieneTabla ? 'Puntaje PAES estimado: se obtiene con la tabla de conversión (de respuestas correctas a puntaje) cargada en el ensayo. No es el puntaje oficial del DEMRE.' : 'Este informe no estima puntajes PAES: el ensayo no tiene tabla de conversión cargada y la app no convierte porcentajes en puntajes por reglas arbitrarias.',
       tieneCortes ? 'Estándares SIMCE estimados: se asignan con los cortes de logro que trae el ensayo. No es el puntaje SIMCE ni el estándar oficial de la Agencia de Calidad.' : null,
       'Comparaciones entre cursos: solo entre cursos que rindieron el mismo ensayo. Las diferencias se expresan en puntos porcentuales (pp) y son descriptivas: no se aplicaron pruebas estadísticas. Con menos de 8 estudiantes los resultados son referenciales.',
       'Distractores: la explicación de un error aparece como hipótesis, salvo que el ensayo traiga el error asociado a cada alternativa.',
@@ -1611,12 +1612,66 @@ const Informe = (() => {
     return { fortalezas, prioridades, habsD, contenidos: contenidos.slice(0, 6) };
   }
 
+  // Portada del informe individual: franja azul con el logo de la hoja, nombre del estudiante y resumen
+  function portadaEstudiante(P, ctxS, modo) {
+    const { doc } = P, { cur, est, sel } = ctxS, col = ctxS.colegio || {};
+    const alto = 168, mezcla = (a, b, t) => { const h2 = (x) => parseInt(x, 16); const c = [1, 3, 5].map((k) => Math.round(h2(a.substr(k, 2)) + (h2(b.substr(k, 2)) - h2(a.substr(k, 2))) * t)); return c; };
+    for (let i = 0; i < 60; i++) { const [r, g, b] = mezcla('#14336A', '#2C5DB3', i / 59); doc.setFillColor(r, g, b); doc.rect(0, (alto / 60) * i, ANCHO, alto / 60 + 0.3, 'F'); }
+    // Burbujas de hoja de respuestas como textura
+    const llenas = new Set([2, 9, 11, 17, 22, 26, 31, 37, 40, 46]);
+    doc.setDrawColor('#5B82C9'); doc.setLineWidth(0.6);
+    for (let f = 0; f < 7; f++) for (let k = 0; k < 7; k++) {
+      const x = ANCHO - 70 + k * 10, y = 70 + f * 10, i = f * 7 + k;
+      if (llenas.has(i)) { doc.setFillColor('#5B82C9'); doc.circle(x, y, 3, 'F'); } else doc.circle(x, y, 3, 'S');
+    }
+    // Logo de la app
+    const lx = M, ly = 20;
+    doc.setFillColor('#FFFFFF'); doc.roundedRect(lx, ly, 16, 20, 1.8, 1.8, 'F');
+    doc.setFillColor(C.azul); [[1, 1], [13, 1], [1, 17], [13, 17]].forEach(([a, b]) => doc.rect(lx + a, ly + b, 2, 2, 'F'));
+    doc.setDrawColor(C.azul); doc.setLineWidth(0.4);
+    [[4.5, 5.5], [11.5, 5.5], [4.5, 9.5], [8, 9.5], [8, 13.5], [11.5, 13.5], [4.5, 16.5], [11.5, 16.5]].forEach(([a, b]) => doc.circle(lx + a, ly + b, 1.2, 'S'));
+    doc.setFillColor(C.azul); [[8, 5.5], [11.5, 9.5], [4.5, 13.5], [8, 16.5]].forEach(([a, b]) => doc.circle(lx + a, ly + b, 1.3, 'F'));
+    fuente(doc, 10, 'bold', '#FFFFFF'); doc.text('Lector óptico', lx + 21, ly + 8);
+    fuente(doc, 9, 'normal', '#C9D6F0'); doc.text(col.nombre ? doc.splitTextToSize(col.nombre, W - 70)[0] : 'Análisis de ensayos PAES y SIMCE', lx + 21, ly + 14);
+    if (col.logo && col.logo.src) {
+      const lado = 26, k = Math.min(lado / col.logo.w, lado / col.logo.h), w = col.logo.w * k, h = col.logo.h * k;
+      doc.setFillColor('#FFFFFF'); doc.roundedRect(ANCHO - M - lado - 4, 17, lado + 4, lado + 4, 3, 3, 'F');
+      try { doc.addImage(col.logo.src, 'JPEG', ANCHO - M - lado - 2 + (lado - w) / 2, 19 + (lado - h) / 2, w, h); } catch (e) { /* logo ilegible */ }
+    }
+    // Título y nombre
+    fuente(doc, 11, 'bold', '#9DB8EC'); doc.text((modo === 'apoderado' ? 'INFORME PARA LA FAMILIA' : 'INFORME PERSONAL DE RESULTADOS'), M, 92);
+    doc.setDrawColor('#9DB8EC'); doc.setLineWidth(0.8); doc.line(M, 96, M + 24, 96);
+    let tam = 30; fuente(doc, tam, 'bold', '#FFFFFF');
+    while (tam > 18 && doc.getTextWidth(est.nombre) > W - 60) { tam -= 1; doc.setFontSize(tam); }
+    const nom = doc.splitTextToSize(est.nombre, W - 50);
+    nom.slice(0, 2).forEach((l, i) => doc.text(l, M, 112 + i * tam * 0.42));
+    const yy = 112 + Math.min(2, nom.length) * tam * 0.42 + 4;
+    fuente(doc, 13, 'normal', '#E3ECFB'); doc.text(`${cur.nombre}${est.lista ? ` · N° de lista ${est.lista}` : ''}`, M, yy);
+    const asigs = [...new Set(sel.map((x) => Estad.grupoEnsayo(x.ens)))];
+    fuente(doc, 11, 'normal', '#C9D6F0'); doc.text(doc.splitTextToSize(lista(asigs), W - 70)[0] || '', M, yy + 8);
+    // Resumen bajo la franja
+    P.y = alto + 14;
+    const C2 = Estad.consolidar(est.id, sel, ctxS.ejes);
+    if (C2.length) cifras(P, C2.slice(0, 4).map((g) => ({ etiqueta: g.nombre.length > 30 ? g.nombre.slice(0, 28) + '…' : g.nombre, valor: pct(g.logro), detalle: `${g.correctas} de ${g.preguntas} correctas · ${plural(g.cantidad, 'ensayo', 'ensayos')}` })));
+    ficha(P, [
+      ['Período evaluado', periodoTexto(sel)],
+      ['Ensayos considerados', sel.map((x) => `${x.ens.nombre}${x.ens.fecha ? ` (${x.ens.fecha})` : ''}`).join('; ')],
+      ['Temáticas', ctxS.ejes ? lista(ctxS.ejes) : 'Todas las de los ensayos'],
+      ['Responsable', col.responsable || ''],
+      ['Fecha de emisión', hoy()],
+    ], 46);
+    fuente(doc, 8.5, 'normal', C.texto2);
+    doc.text(modo === 'apoderado' ? 'Documento para la familia. No incluye rankings ni comparaciones con otros estudiantes.' : 'Documento personal. Los porcentajes vienen de ensayos y sirven para orientar el estudio.', M, ALTO - M);
+    P.sinPie = P.sinPie || new Set(); P.sinPie.add(doc.getNumberOfPages());
+    doc.addPage(); P.y = M;
+  }
+
   function seccionEstudiante(P, ctxS) {
     const { cur, est, sel } = ctxS, pila = nombrePila(est.nombre);
     const C2 = Estad.consolidar(est.id, sel, ctxS.ejes);
     banda(P, est.nombre, `Informe personal de resultados · ${cur.nombre}`, [`Período: ${periodoTexto(sel)}`, `${plural(sel.length, 'ensayo', 'ensayos')}`, `generado el ${hoy()}`].join(' · '));
-    titulo(P, 'Ficha personal', 0, 40);
-    ficha(P, [['Nombre', est.nombre], ['Curso', cur.nombre], ['Período evaluado', periodoTexto(sel)],
+    if (!ctxS.conPortada) titulo(P, 'Ficha personal', 0, 40);
+    if (!ctxS.conPortada) ficha(P, [['Nombre', est.nombre], ['Curso', cur.nombre], ['Período evaluado', periodoTexto(sel)],
       ['Ensayos considerados', sel.map((s) => `${s.ens.nombre}${s.ens.fecha ? ` (${s.ens.fecha})` : ''}`).join('; ')],
       ['Temáticas', ctxS.ejes ? lista(ctxS.ejes) : 'Todas las de los ensayos']]);
     if (!C2.length) { parrafo(P, 'No hay respuestas para las temáticas y ensayos elegidos.', { color: C.critico }); return; }
@@ -1676,15 +1731,22 @@ const Informe = (() => {
       vinetas(P, act, { tam: 10 });
     });
     parrafo(P, `${pila}, estos resultados muestran dónde estás hoy, no un límite. Los puntajes y niveles son estimaciones a partir de ensayos y sirven para orientar el estudio.`, { color: C.texto2, tam: 9 });
-    notaMetodologica(P, { consolidado: true, tieneTabla: sel.some((s) => Estad.tieneTabla(s.ens)), tieneCortes: sel.some((s) => Estad.cortesDe(s.ens)) });
+    // Explicación breve y en lenguaje simple; la nota metodológica completa va en los informes para docentes y directivos
+    titulo(P, '¿Cómo se calculan estos resultados?', 6, 30);
+    vinetas(P, [
+      'El resultado de cada ensayo es la cantidad de respuestas correctas dividida por la cantidad de preguntas. Las preguntas en blanco no suman.',
+      'Cuando se juntan varios ensayos, se suman todas las respuestas correctas y se dividen por todas las preguntas.',
+      sel.some((s) => Estad.tieneTabla(s.ens)) ? 'El puntaje PAES es una estimación con la tabla del ensayo, no un puntaje oficial.' : null,
+      'Los ensayos no siempre tienen la misma dificultad: conviene mirar la tendencia más que un resultado aislado.',
+    ].filter(Boolean), { tam: 9 });
   }
 
   function seccionApoderado(P, ctxS) {
     const { cur, est, sel } = ctxS, pila = nombrePila(est.nombre), col = ctxS.colegio || {};
     const C2 = Estad.consolidar(est.id, sel, ctxS.ejes);
     banda(P, est.nombre, `Informe para la familia · ${cur.nombre}`, [`Período: ${periodoTexto(sel)}`, `generado el ${hoy()}`].join(' · '));
-    titulo(P, 'Identificación', 0, 30);
-    ficha(P, [['Estudiante', est.nombre], ['Curso', cur.nombre], ['Evaluaciones', sel.map((s) => s.ens.nombre).join('; ')], ['Fecha o período', periodoTexto(sel)]]);
+    if (!ctxS.conPortada) titulo(P, 'Identificación', 0, 30);
+    if (!ctxS.conPortada) ficha(P, [['Estudiante', est.nombre], ['Curso', cur.nombre], ['Evaluaciones', sel.map((s) => s.ens.nombre).join('; ')], ['Fecha o período', periodoTexto(sel)]]);
     if (!C2.length) { parrafo(P, 'No hay respuestas para los ensayos elegidos.', { color: C.critico }); return; }
     C2.forEach((g) => {
       const ens = g.ensayos[g.ensayos.length - 1].ens, ejes = conDatos(g.porEje), habs = conDatos(g.porHabilidad);
@@ -1745,7 +1807,7 @@ const Informe = (() => {
   function acumulado(ctxS, modo = 'estudiante') {
     const lista2 = Array.isArray(ctxS) ? ctxS : [ctxS], c0 = lista2[0];
     const P = docCon(c0, pieDe(c0, modo === 'apoderado' ? 'Informe para padres y apoderados' : 'Informe del estudiante', lista2.length === 1 ? `${c0.est.nombre} · ${c0.cur.nombre}` : c0.cur.nombre));
-    lista2.forEach((c, i) => { if (i) nuevaPagina(P); (modo === 'apoderado' ? seccionApoderado : seccionEstudiante)(P, c); });
+    lista2.forEach((c, i) => { if (i) nuevaPagina(P); const cp = c.sel.length > 0; if (cp) portadaEstudiante(P, c, modo); (modo === 'apoderado' ? seccionApoderado : seccionEstudiante)(P, { ...c, conPortada: cp }); });
     piePaginas(P); return P.doc.output('blob');
   }
   // Las cuatro secciones en un documento: directivo, docente y, por cada estudiante elegido, su informe y el de su familia
