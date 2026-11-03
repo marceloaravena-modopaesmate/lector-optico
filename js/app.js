@@ -1328,13 +1328,20 @@
     const niveles = [...new Set(sel.map((c) => nombreNivel(c)))];
     return contextoDirectivo(ens, sel, niveles.length === 1 ? niveles[0] : 'Todos los cursos');
   }
-  function contextoDirectivo(ens, cursosSel, nivel) {
+  function contextoDirectivo(ens, cursosSel, nivel, sinAnterior = false) {
     const porCurso = cursosSel.map((c, idx) => ({ curso: c, idx, A: Estad.analizar(ens, c, hojasDe(ens, c)) })).filter((x) => x.A.hechas.length);
     const N = Estad.nivel(ens, porCurso.map((x) => x.curso), (c) => hojasDe(ens, c), nivel || 'Cursos seleccionados');
     const vals = porCurso.map((x) => Estad.validar(ens, x.curso, hojasDe(ens, x.curso)));
     const validacion = { errores: [...new Set(vals.flatMap((v) => v.errores))], avisos: [...new Set(vals.flatMap((v) => v.avisos))] };
     validacion.ok = !validacion.errores.length;
-    return { ens, nivel, porCurso, inst: N.A, brechas: N.brechas, colegio: config().colegio || {}, validacion };
+    // Ensayo anterior del mismo tipo que rindió alguno de estos cursos (para comparar)
+    let anterior = null;
+    if (!sinAnterior) {
+      const previo = ensayos().filter((e) => e.id !== ens.id && Estad.grupoEnsayo(e) === Estad.grupoEnsayo(ens) && Estad.fechaOrden(e) < Estad.fechaOrden(ens) && porCurso.some((x) => conHojasEn(e, x.curso)))
+        .sort((a, b) => Estad.fechaOrden(b).localeCompare(Estad.fechaOrden(a)))[0];
+      if (previo) { const D = contextoDirectivo(previo, porCurso.map((x) => x.curso).filter((c) => conHojasEn(previo, c)), nivel, true); if (D.porCurso.length) anterior = { ens: previo, porCurso: D.porCurso, inst: D.inst }; }
+    }
+    return { ens, nivel, porCurso, inst: N.A, brechas: N.brechas, colegio: config().colegio || {}, validacion, anterior };
   }
   // Contexto del informe docente con los cursos elegidos para comparar
   function contextoDocente(ens, cur, cursosSel) {
