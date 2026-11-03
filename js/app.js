@@ -610,7 +610,7 @@
       ? `<button class="btn" style="flex-direction:column;gap:2px;padding:10px" data-accion="enviar-desde-perfil" data-a="${modo}" ${n ? '' : 'disabled'}>✉ Enviar informe ${quien}<small style="display:block;font-weight:500;color:var(--texto-2)">${h(correo)}</small></button>`
       : `<button class="btn" style="flex-direction:column;gap:2px;padding:10px" disabled>✉ Enviar informe ${quien}<small style="display:block;font-weight:500">Falta su correo</small></button>`;
     return `<section class="tarjeta pad"><span class="etiqueta">Enviar resultados por correo</span>
-      <span class="nota">${n ? `El informe incluye ${n === 1 ? 'el ensayo que rindió' : `los ${n} ensayos que rindió`}. Se descarga el PDF y se abre tu correo con el destinatario, el asunto y el mensaje listos: solo adjuntas el PDF y envías.` : 'Todavía no tiene hojas corregidas en este curso.'}</span>
+      <span class="nota">${n ? `El informe incluye ${n === 1 ? 'el ensayo que rindió' : `los ${n} ensayos que rindió`}. Se descarga el PDF y luego eliges cómo abrir tu correo (tu app, Gmail u Outlook), con el destinatario, el asunto y el mensaje listos: solo adjuntas el PDF y envías.` : 'Todavía no tiene hojas corregidas en este curso.'}</span>
       ${boton('estudiante', e.correo, 'al estudiante')}
       ${boton('apoderado', e.correoApoderado, 'al apoderado')}
       <span class="nota">Para elegir qué ensayos incluir, usa su ficha en Estadísticas.</span>
@@ -1059,7 +1059,7 @@
       ${S.modo === 'docente' ? '' : (() => {
         const dest = S.modo === 'apoderado' ? est.correoApoderado : est.correo;
         return dest ? `<button class="btn" data-accion="enviar-perfil" ${n ? '' : 'disabled'}>✉ Enviar por correo a ${h(dest)}</button>
-          <span class="nota">Se descarga el PDF y se abre tu correo con el destinatario, el asunto y el mensaje listos. Solo tienes que adjuntar el PDF y enviar.</span>`
+          <span class="nota">Se descarga el PDF y luego eliges cómo abrir tu correo (tu app, Gmail u Outlook), con todo escrito. Solo tienes que adjuntar el PDF y enviar.</span>`
           : `<span class="nota">Para enviarlo por correo, agrega arriba el correo ${S.modo === 'apoderado' ? 'del apoderado' : 'del estudiante'}.</span>`;
       })()}
     </section>`;
@@ -1105,11 +1105,13 @@
         ? `Estimado(a) apoderado(a):\n\nLe envío adjunto el informe de resultados de ${r.est.nombre} (${r.cur.nombre}) en ${ens}. Incluye sus fortalezas, los aspectos por reforzar y orientaciones para acompañarlo(a) desde la casa.\n\nQuedo atento(a) a sus consultas.\n\nSaludos cordiales${col.nombre ? ',\n' + col.nombre : ''}`
         : `Hola ${nombre}:\n\nTe envío adjunto tu informe de resultados en ${ens}. Ahí puedes ver en qué te fue bien, qué preguntas conviene repasar y un plan para seguir mejorando.\n\nCualquier duda, me preguntas en clases.\n\nSaludos${col.nombre ? ',\n' + col.nombre : ''}`;
       await descargar(r.nombre, r.blob);
-      const a = document.createElement('a');
-      a.href = `mailto:${encodeURIComponent(para).replace(/%40/g, '@')}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
-      a.target = '_top'; a.rel = 'noopener';
-      document.body.appendChild(a); a.click(); a.remove();
-      toast(`Adjunta el archivo ${r.nombre} antes de enviar`);
+      // El correo se abre con un toque del docente en la ventana siguiente: abrirlo solo tras la descarga lo bloquean muchos navegadores
+      const q = encodeURIComponent, dest = q(para).replace(/%40/g, '@');
+      E.correoListo = { para, asunto, cuerpo, archivo: r.nombre,
+        mailto: `mailto:${dest}?subject=${q(asunto)}&body=${q(cuerpo)}`,
+        gmail: `https://mail.google.com/mail/?view=cm&fs=1&to=${dest}&su=${q(asunto)}&body=${q(cuerpo)}`,
+        outlook: `https://outlook.office.com/mail/deeplink/compose?to=${dest}&subject=${q(asunto)}&body=${q(cuerpo)}` };
+      render();
       return true;
     } catch (e) { console.error(e); toast('No se pudo preparar el correo: ' + e.message); }
     return false;
@@ -1133,7 +1135,7 @@
         <section class="tarjeta pad"><span class="etiqueta">¿A quién le envías?</span>
           <div class="segmento"><button data-accion="envio-modo" data-a="estudiante" aria-pressed="${!apo}">Estudiantes</button><button data-accion="envio-modo" data-a="apoderado" aria-pressed="${apo}">Apoderados</button></div>
           ${grupos.length > 1 ? `<span class="etiqueta">Ensayos que incluye</span><div class="filtros">${['__todos', ...grupos].map((g) => `<button data-accion="envio-grupo" data-a="${h(g)}" aria-pressed="${V.grupo === g}">${g === '__todos' ? 'Todos' : h(g)}</button>`).join('')}</div>` : ''}
-          <span class="nota">Toca <b>Enviar</b> en cada fila: se descarga el PDF de ese estudiante y se abre tu correo con el destinatario, el asunto y el mensaje listos. Adjuntas el PDF, envías y vuelves aquí para el siguiente. La app no puede enviar correos sola porque no tiene un servidor de correo.</span>
+          <span class="nota">Toca <b>Enviar</b> en cada fila: se descarga el PDF de ese estudiante y aparece una ventana para abrir tu correo (tu app, Gmail u Outlook) con el destinatario, el asunto y el mensaje listos. Adjuntas el PDF, envías y vuelves aquí para el siguiente. La app no puede enviar correos sola porque no tiene un servidor de correo.</span>
         </section>
         <div class="cifras">
           <div class="tarjeta"><span>Listos para enviar</span><b class="num">${listos.length}</b></div>
@@ -1443,8 +1445,21 @@
       </div>${nav('')}</div>`;
   }
 
+  function capaCorreo() {
+    const K = E.correoListo;
+    return `<div class="velo"><div class="hoja-inferior capa-correo" role="dialog" aria-label="Enviar por correo">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2 style="font-size:18px">Correo para ${h(K.para)}</h2><button class="btn-redondo" data-accion="cerrar-correo" aria-label="Cerrar">${ICONO.cerrar}</button></div>
+      <span class="nota">1. El PDF <b>${h(K.archivo)}</b> ya se descargó.<br>2. Elige cómo abrir tu correo: el destinatario, el asunto y el mensaje van escritos.<br>3. Adjunta el PDF y envía.</span>
+      <a class="btn primario grande" href="${h(K.mailto)}" target="_top" data-accion="correo-abierto">✉ Abrir mi aplicación de correo</a>
+      <div class="dos"><a class="btn" href="${h(K.gmail)}" target="_blank" rel="noopener" data-accion="correo-abierto">Gmail</a><a class="btn" href="${h(K.outlook)}" target="_blank" rel="noopener" data-accion="correo-abierto">Outlook</a></div>
+      <button class="btn" data-accion="copiar-correo">Copiar destinatario, asunto y mensaje</button>
+      <span class="nota">Si no se abre nada, usa Gmail u Outlook (se abren en el navegador con tu cuenta) o copia el mensaje y pégalo en un correo nuevo.</span>
+    </div></div>`;
+  }
+
   function capas() {
     let html = '';
+    if (E.correoListo) html += capaCorreo();
     if (E.elegirInforme) html += capaElegirInformes();
     if (E.confirmar) {
       html += `<div class="velo"><div class="hoja-inferior" role="alertdialog" aria-label="Confirmar">
@@ -1974,6 +1989,13 @@
     'editar-est': (a) => { E.estEditado = a; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'nuevo-est': () => { E.estEditado = null; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'guardar-est': () => guardarPerfilEstudiante(),
+    'cerrar-correo': () => { E.correoListo = null; E.mantenerScroll = true; render(); },
+    'correo-abierto': () => { toast('Recuerda adjuntar el PDF antes de enviar'); },
+    'copiar-correo': async () => {
+      const K = E.correoListo, t = `Para: ${K.para}\nAsunto: ${K.asunto}\n\n${K.cuerpo}`;
+      try { await navigator.clipboard.writeText(t); toast('Copiado: pégalo en un correo nuevo'); }
+      catch (e) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Copiado: pégalo en un correo nuevo'); } catch (e2) { toast('No se pudo copiar'); } ta.remove(); }
+    },
     'envio-curso': () => { E.pantalla = 'envio-curso'; window.scrollTo(0, 0); render(); },
     'envio-modo': (a) => { E.envio.modo = a; E.mantenerScroll = true; render(); },
     'envio-grupo': (a) => { E.envio.grupo = a; E.mantenerScroll = true; render(); },
