@@ -489,3 +489,14 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .aviso.respaldo { flex-wrap: wrap; }
 .aviso.respaldo > span { flex: 1; min-width: 0; }
 .aviso.respaldo .fila-botones { width: 100%; }
+
+/* Clave del ensayo con el mismo formato de la plantilla Excel */
+.tabla-claves { border: 1px solid var(--borde); border-radius: 10px; overflow: auto; max-height: 460px; font-size: 13px; }
+.tabla-claves table { border-collapse: collapse; width: 100%; }
+.tabla-claves th { position: sticky; top: 0; z-index: 1; background: #1F3A68; color: #FFFFFF; font-weight: 700; padding: 8px 10px; text-align: center; white-space: nowrap; }
+.tabla-claves td { padding: 6px 10px; border-top: 1px solid var(--borde); border-left: 1px solid var(--borde); white-space: nowrap; text-align: left; }
+.tabla-claves td:first-child { border-left: 0; }
+.tabla-claves td.num, .tabla-claves td.centro { text-align: center; }
+.tabla-claves td.clave { font-weight: 700; text-align: center; color: var(--azul); }
+.tabla-claves tbody tr:nth-child(even) td { background: var(--blanco-fondo); }
+.tabla-claves tr.piloto td { color: var(--texto-2); }

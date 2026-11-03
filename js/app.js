@@ -497,7 +497,7 @@
     const e = E.ensayoEditado;
     const nuevo = !Almacen.obtener('ensayos', e.id);
     const asignaturas = Temarios.NOMBRES;
-    const filas = e.preguntas.slice(0, 6).map((p) => `<tr><td class="num">${p.n}</td><td><b>${h(p.clave)}</b></td><td>${h(p.eje)}</td><td>${h(p.habilidad)}</td></tr>`).join('');
+    const filas = e.preguntas.map((p) => `<tr${p.piloto ? ' class="piloto"' : ''}><td class="num">${p.n}</td><td class="clave">${h(p.clave)}</td><td>${h(p.eje)}</td><td>${h(p.habilidad)}</td><td>${h(p.contenido || '')}</td><td class="centro">${p.piloto ? 'sí' : ''}</td></tr>`).join('');
     const ejes = new Set(e.preguntas.map((p) => p.eje).filter(Boolean)).size;
     const habs = new Set(e.preguntas.map((p) => p.habilidad).filter(Boolean)).size;
     const clave = e.preguntas.map((p) => p.clave).join('');
@@ -517,8 +517,7 @@
           <label class="btn punteado grande" for="e-excel">${ICONO.subir} Cargar plantilla Excel</label>
           <input type="file" id="e-excel" accept=".xlsx,.xls" class="oculto-visual" data-archivo="ensayo">
           ${e.preguntas.length ? `<div class="aviso ok">${ICONO.check}<span>${e.preguntas.length} preguntas · ${ejes} ejes · ${habs} habilidades</span></div>
-          <div class="tabla-mini"><table><thead><tr><th>N°</th><th>Clave</th><th>Eje</th><th>Habilidad</th></tr></thead><tbody>${filas}</tbody></table></div>
-          ${e.preguntas.length > 6 ? `<span style="font-size:13px;color:var(--texto-2)">y ${e.preguntas.length - 6} preguntas más.</span>` : ''}` : ''}
+          <div class="tabla-claves" tabindex="0" aria-label="Clave del ensayo"><table><thead><tr><th>N°</th><th>Clave</th><th>Eje / Contenido</th><th>Habilidad</th><th>Contenido específico</th><th>Piloto</th></tr></thead><tbody>${filas}</tbody></table></div>` : ''}
           <label class="campo" for="e-clave">O escribe la clave seguida (una letra por pregunta)
             <input id="e-clave" data-campo="clave" value="${h(clave)}" placeholder="ABDCA…" autocapitalize="characters" autocomplete="off" spellcheck="false" style="font-family:ui-monospace,monospace;letter-spacing:0.08em"></label>
           <label class="campo" for="e-pilotos">Preguntas piloto (no cuentan para el puntaje, la nota ni el logro)
