@@ -1077,7 +1077,7 @@
     const est = cur.estudiantes.find((e) => e.id === S.id);
     const sufijo = elegidos.length === 1 ? Almacen.id(ultimo.nombre).slice(0, 30) : `${elegidos.length}_ensayos`;
     if (S.modo !== 'docente') {
-      const ctxS = contextoEstudiante(cur, est, { ensayosEst: elegidos.map((e) => e.id), ejes: null, desde: '', hasta: '' });
+      const ctxS = contextoEstudiante(cur, est, { ensayosEst: elegidos.map((e) => e.id), ejes: S.ejes || null, desde: '', hasta: '' });
       return { est, cur, elegidos, nombre: `informe_${S.modo}_${Almacen.id(Estad.nombres(est.nombre).completo)}_${sufijo}.pdf`, blob: Informe.acumulado(ctxS, S.modo) };
     }
     const base = contextoInforme(ultimo, elegidos.map((e) => e.id));
@@ -1125,19 +1125,21 @@
     const c = Almacen.obtener('cursos', E.cursoAbierto);
     if (!c) return pCursos();
     const V = E.envio = E.envio && E.envio.cur === c.id ? E.envio : { cur: c.id, modo: 'estudiante', grupo: '__todos', enviados: {} };
+    const filtroInf = V.filtro ? (o) => V.filtro.ensayos.includes(o.e.id) : () => true;
     const grupos = [...new Set(ensayosConHojas(c).map((e) => Estad.grupoEnsayo(e)))];
     if (V.grupo !== '__todos' && !grupos.includes(V.grupo)) V.grupo = '__todos';
     const apo = V.modo === 'apoderado';
     const filas = [...c.estudiantes].sort((a, b) => a.lista - b.lista).map((e) => {
-      const suyos = ensayosDelEstudiante(e.id, c).filter((o) => V.grupo === '__todos' || Estad.grupoEnsayo(o.e) === V.grupo);
+      const suyos = ensayosDelEstudiante(e.id, c).filter((o) => filtroInf(o) && (V.grupo === '__todos' || Estad.grupoEnsayo(o.e) === V.grupo));
       return { e, n: suyos.length, correo: apo ? e.correoApoderado : e.correo, enviado: V.enviados[`${V.modo}:${e.id}`] };
     });
     const listos = filas.filter((f) => f.correo && f.n), sinCorreo = filas.filter((f) => !f.correo).length, hechos = filas.filter((f) => f.enviado).length;
-    return `<div class="pantalla sin-nav">${cabecera('Enviar resultados por correo', c.nombre, 'curso-detalle')}
+    return `<div class="pantalla sin-nav">${cabecera('Enviar resultados por correo', c.nombre, V.volver || 'curso-detalle')}
       <div class="cuerpo">
         <section class="tarjeta pad"><span class="etiqueta">¿A quién le envías?</span>
           <div class="segmento"><button data-accion="envio-modo" data-a="estudiante" aria-pressed="${!apo}">Estudiantes</button><button data-accion="envio-modo" data-a="apoderado" aria-pressed="${apo}">Apoderados</button></div>
-          ${grupos.length > 1 ? `<span class="etiqueta">Ensayos que incluye</span><div class="filtros">${['__todos', ...grupos].map((g) => `<button data-accion="envio-grupo" data-a="${h(g)}" aria-pressed="${V.grupo === g}">${g === '__todos' ? 'Todos' : h(g)}</button>`).join('')}</div>` : ''}
+          ${V.filtro ? `<span class="nota">Incluye ${V.filtro.ensayos.length === 1 ? 'el ensayo elegido' : `los ${V.filtro.ensayos.length} ensayos elegidos`} en Informes y análisis${V.filtro.ejes ? ` (temáticas: ${h(V.filtro.ejes.join(', '))})` : ''}.</span>` : ''}
+          ${grupos.length > 1 && !V.filtro ? `<span class="etiqueta">Ensayos que incluye</span><div class="filtros">${['__todos', ...grupos].map((g) => `<button data-accion="envio-grupo" data-a="${h(g)}" aria-pressed="${V.grupo === g}">${g === '__todos' ? 'Todos' : h(g)}</button>`).join('')}</div>` : ''}
           <span class="nota">Toca <b>Enviar</b> en cada fila: se descarga el PDF de ese estudiante y aparece una ventana para abrir tu correo (tu app, Gmail u Outlook) con el destinatario, el asunto y el mensaje listos. Adjuntas el PDF, envías y vuelves aquí para el siguiente. La app no puede enviar correos sola porque no tiene un servidor de correo.</span>
         </section>
         <div class="cifras">
@@ -1328,6 +1330,8 @@
       ${opciones ? paso(5, 'Opciones', opciones) : ''}
       ${paso(opciones ? 6 : 5, 'Vista previa', previa || '<span class="nota">Elige las opciones de arriba.</span>')}
       <button class="btn primario grande" data-accion="inf-generar">${ICONO.bajar} Generar PDF</button>
+      ${(S.dest === 'estudiante' || S.dest === 'apoderado') && curDoc ? `<button class="btn grande cta" data-accion="inf-enviar">✉ Enviar por correo a cada ${S.dest === 'apoderado' ? 'apoderado' : 'estudiante'} de ${h(curDoc.nombre)}</button>
+      <span class="nota">Cada uno recibe su propio informe, con los ensayos${S.ejes ? ' y temáticas' : ''} que elegiste arriba.</span>` : ''}
       <div class="fila-guardar"><input id="inf-nombre" placeholder="Nombre de la configuración, ej.: II medio M1 directivo"><button class="btn" data-accion="inf-guardar">Guardar</button></div>
     </div>${nav('')}</div>`;
   }
@@ -2004,12 +2008,21 @@
       try { await navigator.clipboard.writeText(t); toast('Copiado: pégalo en un correo nuevo'); }
       catch (e) { const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); toast('Copiado: pégalo en un correo nuevo'); } catch (e2) { toast('No se pudo copiar'); } ta.remove(); }
     },
-    'envio-curso': () => { E.pantalla = 'envio-curso'; window.scrollTo(0, 0); render(); },
+    'envio-curso': () => { if (E.envio && (E.envio.filtro || E.envio.cur !== E.cursoAbierto)) E.envio = null; E.pantalla = 'envio-curso'; window.scrollTo(0, 0); render(); },
+    'inf-enviar': () => {
+      const { S, curDoc } = datosInformes();
+      if (!curDoc) return;
+      // Los ensayos marcados en el paso 5 (con "Todos los estudiantes" es la unión; cada uno recibe los que rindió)
+      E.cursoAbierto = curDoc.id;
+      E.envio = { cur: curDoc.id, modo: S.dest, grupo: '__todos', enviados: {}, volver: 'informes', filtro: { ensayos: [...(S.ensayosEst || [])], ejes: S.ejes ? [...S.ejes] : null } };
+      E.pantalla = 'envio-curso'; window.scrollTo(0, 0); render();
+    },
     'envio-modo': (a) => { E.envio.modo = a; E.mantenerScroll = true; render(); },
     'envio-grupo': (a) => { E.envio.grupo = a; E.mantenerScroll = true; render(); },
     'envio-uno': async (a) => {
       const V = E.envio, c = Almacen.obtener('cursos', V.cur);
-      E.fichaSel = { id: a, cur: c.id, modo: V.modo, marcados: ensayosDelEstudiante(a, c).filter((o) => V.grupo === '__todos' || Estad.grupoEnsayo(o.e) === V.grupo).map((o) => o.e.id) };
+      const fi = V.filtro ? (o) => V.filtro.ensayos.includes(o.e.id) : () => true;
+      E.fichaSel = { id: a, cur: c.id, modo: V.modo, ejes: V.filtro ? V.filtro.ejes : null, marcados: ensayosDelEstudiante(a, c).filter((o) => fi(o) && (V.grupo === '__todos' || Estad.grupoEnsayo(o.e) === V.grupo)).map((o) => o.e.id) };
       if (await enviarInformeEstudiante()) { V.enviados[`${V.modo}:${a}`] = true; E.mantenerScroll = true; render(); }
     },
     'enviar-desde-perfil': (a) => {
