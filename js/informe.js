@@ -17,7 +17,8 @@ const Informe = (() => {
   const pts = (d) => Math.abs(Math.round(d * 100)) + (Math.abs(Math.round(d * 100)) === 1 ? ' punto' : ' puntos');
   const nt = (n) => (n == null ? '–' : n.toFixed(1).replace('.', ','));
   const plural = (n, s, p) => `${n} ${n === 1 ? s : p}`;
-  const nombrePila = (n) => String(n || '').split(/\s+/)[0];
+  const nombrePila = (n) => Estad.nombres(n).pila;
+  const nombreCompleto = (n) => Estad.nombres(n).completo;
   const lista = (xs) => (xs.length <= 1 ? xs.join('') : xs.slice(0, -1).join(', ') + ' y ' + xs[xs.length - 1]);
   const mayus = (s) => s.charAt(0).toUpperCase() + s.slice(1);
   const minus = (s) => s.charAt(0).toLowerCase() + s.slice(1);
@@ -105,7 +106,9 @@ const Informe = (() => {
     items.forEach((it, i) => {
       const x = M + i * (w + gap);
       doc.setFillColor(C.suave); doc.roundedRect(x, P.y, w, alto, 2.5, 2.5, 'F');
-      fuente(doc, 8.5, 'normal', C.texto2); doc.text(it.etiqueta, x + 4, P.y + 6);
+      let te = 8.5; fuente(doc, te, 'normal', C.texto2);
+      while (te > 6.5 && doc.getTextWidth(it.etiqueta) > w - 8) { te -= 0.5; doc.setFontSize(te); }
+      doc.text(doc.getTextWidth(it.etiqueta) > w - 8 ? doc.splitTextToSize(it.etiqueta, w - 10)[0] + '…' : it.etiqueta, x + 4, P.y + 6);
       let tam = 17;
       fuente(doc, tam, 'bold', C.azul);
       while (tam > 10 && doc.getTextWidth(String(it.valor)) > w - 7) { tam -= 1; doc.setFontSize(tam); }
@@ -230,9 +233,10 @@ const Informe = (() => {
   }
 
   // Tabla simple con encabezado que se repite en cada página
-  function tabla(P, cols, filas, { tam = 8.8 } = {}) {
+  function tabla(P, cols, filas, { tam = 8.8, sinEncabezado = false } = {}) {
     const { doc } = P, lh = tam >= 8.5 ? 6.4 : 5.6;
     const encabezado = () => {
+      if (sinEncabezado) return;
       doc.setFillColor(C.suave); doc.rect(M, P.y, W, lh, 'F');
       fuente(doc, Math.min(8.5, tam), 'bold', C.texto2);
       let x = M;
@@ -1261,8 +1265,8 @@ const Informe = (() => {
 
   // Tabla de dos columnas (dato y valor); omite las filas sin valor
   function ficha(P, filas, anchoDato = 64) {
-    tabla(P, [{ titulo: 'Dato', ancho: anchoDato, negrita: true, envolver: true }, { titulo: 'Valor', ancho: W - anchoDato, envolver: true, negrita: false }],
-      filas.filter((f) => f[1] != null && f[1] !== '').map((f) => ({ celdas: f })));
+    tabla(P, [{ titulo: '', ancho: anchoDato, negrita: true, envolver: true }, { titulo: '', ancho: W - anchoDato, envolver: true, negrita: false }],
+      filas.filter((f) => f[1] != null && f[1] !== '').map((f) => ({ celdas: f })), { sinEncabezado: true });
   }
 
   function avisoDatos(P, val) {
@@ -1771,8 +1775,9 @@ const Informe = (() => {
     fuente(doc, 11, 'bold', '#9DB8EC'); doc.text((modo === 'apoderado' ? 'INFORME PARA LA FAMILIA' : 'INFORME PERSONAL DE RESULTADOS'), M, 92);
     doc.setDrawColor('#9DB8EC'); doc.setLineWidth(0.8); doc.line(M, 96, M + 24, 96);
     let tam = 30; fuente(doc, tam, 'bold', '#FFFFFF');
-    while (tam > 18 && doc.getTextWidth(est.nombre) > W - 60) { tam -= 1; doc.setFontSize(tam); }
-    const nom = doc.splitTextToSize(est.nombre, W - 50);
+    const nombreV = nombreCompleto(est.nombre);
+    while (tam > 18 && doc.getTextWidth(nombreV) > W - 60) { tam -= 1; doc.setFontSize(tam); }
+    const nom = doc.splitTextToSize(nombreV, W - 50);
     nom.slice(0, 2).forEach((l, i) => doc.text(l, M, 112 + i * tam * 0.42));
     const yy = 112 + Math.min(2, nom.length) * tam * 0.42 + 4;
     fuente(doc, 13, 'normal', '#E3ECFB'); doc.text(`${cur.nombre}${est.lista ? ` · N° de lista ${est.lista}` : ''}`, M, yy);
@@ -1781,7 +1786,7 @@ const Informe = (() => {
     // Resumen bajo la franja
     P.y = alto + 14;
     const C2 = Estad.consolidar(est.id, sel, ctxS.ejes);
-    if (C2.length) cifras(P, C2.slice(0, 4).map((g) => ({ etiqueta: g.nombre.length > 30 ? g.nombre.slice(0, 28) + '…' : g.nombre, valor: pct(g.logro), detalle: `${g.correctas} de ${g.preguntas} correctas · ${plural(g.cantidad, 'ensayo', 'ensayos')}` })));
+    if (C2.length) cifras(P, C2.slice(0, 4).map((g) => ({ etiqueta: g.nombre, valor: pct(g.logro), detalle: `${g.correctas} de ${g.preguntas} correctas · ${plural(g.cantidad, 'ensayo', 'ensayos')}` })));
     ficha(P, [
       ['Período evaluado', periodoTexto(sel)],
       ['Ensayos considerados', sel.map((x) => `${x.ens.nombre}${x.ens.fecha ? ` (${x.ens.fecha})` : ''}`).join('; ')],
@@ -1798,9 +1803,9 @@ const Informe = (() => {
   function seccionEstudiante(P, ctxS) {
     const { cur, est, sel } = ctxS, pila = nombrePila(est.nombre);
     const C2 = Estad.consolidar(est.id, sel, ctxS.ejes);
-    banda(P, est.nombre, `Informe personal de resultados · ${cur.nombre}`, [`Período: ${periodoTexto(sel)}`, `${plural(sel.length, 'ensayo', 'ensayos')}`, `generado el ${hoy()}`].join(' · '));
+    banda(P, nombreCompleto(est.nombre), `Informe personal de resultados · ${cur.nombre}`, [`Período: ${periodoTexto(sel)}`, `${plural(sel.length, 'ensayo', 'ensayos')}`, `generado el ${hoy()}`].join(' · '));
     if (!ctxS.conPortada) titulo(P, 'Ficha personal', 0, 40);
-    if (!ctxS.conPortada) ficha(P, [['Nombre', est.nombre], ['Curso', cur.nombre], ['Período evaluado', periodoTexto(sel)],
+    if (!ctxS.conPortada) ficha(P, [['Nombre', nombreCompleto(est.nombre)], ['Curso', cur.nombre], ['Período evaluado', periodoTexto(sel)],
       ['Ensayos considerados', sel.map((s) => `${s.ens.nombre}${s.ens.fecha ? ` (${s.ens.fecha})` : ''}`).join('; ')],
       ['Temáticas', ctxS.ejes ? lista(ctxS.ejes) : 'Todas las de los ensayos']]);
     if (!C2.length) { parrafo(P, 'No hay respuestas para las temáticas y ensayos elegidos.', { color: C.critico }); return; }
@@ -1815,9 +1820,8 @@ const Informe = (() => {
         { etiqueta: 'En blanco', valor: String(g.omisiones), detalle: 'sin responder' },
       ]);
       const L = lecturaDocente(g, est, 'estudiante');
-      titulo(P, 'Comentario de tu profesor o profesora', 4, 30);
+      titulo(P, 'Según el análisis de tus resultados', 4, 30);
       parrafo(P, L.comentario, { tam: 10.5 });
-      if (g.cantidad > 1) parrafo(P, `El resultado global suma las respuestas correctas de los ${g.cantidad} ensayos y las divide por el total de preguntas (${g.correctas} ÷ ${g.preguntas}). No es el promedio de los porcentajes, porque los ensayos no tienen la misma cantidad de preguntas.`, { color: C.texto2, tam: 9 });
       tabla(P, [{ titulo: 'Ensayo', ancho: W - 108, envolver: true, negrita: true }, { titulo: 'Fecha', ancho: 22, negrita: false }, { titulo: 'Preguntas', ancho: 20, der: true }, { titulo: 'Correctas', ancho: 20, der: true }, { titulo: 'Blanco', ancho: 16, der: true }, { titulo: 'Logro', ancho: 30, der: true }],
         g.ensayos.map((e) => ({ celdas: [e.ens.nombre, e.ens.fecha || '', e.preguntas.length, e.correctas, e.omisiones, `${pct(e.logro)}${!ctxS.ejes && e.x.puntaje != null ? ` · ${e.x.puntaje} pts.` : ''}`] })));
       if (g.cantidad >= 2) {
@@ -1860,22 +1864,14 @@ const Informe = (() => {
       vinetas(P, act, { tam: 10 });
     });
     parrafo(P, `${pila}, estos resultados muestran dónde estás hoy, no un límite. Los puntajes y niveles son estimaciones a partir de ensayos y sirven para orientar el estudio.`, { color: C.texto2, tam: 9 });
-    // Explicación breve y en lenguaje simple; la nota metodológica completa va en los informes para docentes y directivos
-    titulo(P, '¿Cómo se calculan estos resultados?', 6, 30);
-    vinetas(P, [
-      'El resultado de cada ensayo es la cantidad de respuestas correctas dividida por la cantidad de preguntas. Las preguntas en blanco no suman.',
-      'Cuando se juntan varios ensayos, se suman todas las respuestas correctas y se dividen por todas las preguntas.',
-      sel.some((s) => Estad.tieneTabla(s.ens)) ? 'El puntaje PAES es una estimación con la tabla del ensayo, no un puntaje oficial.' : null,
-      'Los ensayos no siempre tienen la misma dificultad: conviene mirar la tendencia más que un resultado aislado.',
-    ].filter(Boolean), { tam: 9 });
   }
 
   function seccionApoderado(P, ctxS) {
     const { cur, est, sel } = ctxS, pila = nombrePila(est.nombre), col = ctxS.colegio || {};
     const C2 = Estad.consolidar(est.id, sel, ctxS.ejes);
-    banda(P, est.nombre, `Informe para la familia · ${cur.nombre}`, [`Período: ${periodoTexto(sel)}`, `generado el ${hoy()}`].join(' · '));
+    banda(P, nombreCompleto(est.nombre), `Informe para la familia · ${cur.nombre}`, [`Período: ${periodoTexto(sel)}`, `generado el ${hoy()}`].join(' · '));
     if (!ctxS.conPortada) titulo(P, 'Identificación', 0, 30);
-    if (!ctxS.conPortada) ficha(P, [['Estudiante', est.nombre], ['Curso', cur.nombre], ['Evaluaciones', sel.map((s) => s.ens.nombre).join('; ')], ['Fecha o período', periodoTexto(sel)]]);
+    if (!ctxS.conPortada) ficha(P, [['Estudiante', nombreCompleto(est.nombre)], ['Curso', cur.nombre], ['Evaluaciones', sel.map((s) => s.ens.nombre).join('; ')], ['Fecha o período', periodoTexto(sel)]]);
     if (!C2.length) { parrafo(P, 'No hay respuestas para los ensayos elegidos.', { color: C.critico }); return; }
     C2.forEach((g) => {
       const ens = g.ensayos[g.ensayos.length - 1].ens, ejes = conDatos(g.porEje), habs = conDatos(g.porHabilidad);
@@ -1887,7 +1883,7 @@ const Informe = (() => {
         { etiqueta: 'Temáticas evaluadas', valor: String(ejes.length), detalle: lista(ejes.map((o) => o.nombre)) },
       ]);
       const L = lecturaDocente(g, est, 'apoderado');
-      titulo(P, 'Comentario del docente', 4, 30);
+      titulo(P, 'Según el análisis de sus resultados', 4, 30);
       parrafo(P, L.comentario, { tam: 10.5 });
       recuadros(P, [{ titulo: 'Lo que hace bien', color: C.t3, fondo: '#EEF4FC', items: L.bueno }, { titulo: 'Su siguiente paso', color: C.critico, fondo: '#FCF0E9', items: L.mejorar }]);
       if (g.cantidad >= 2) {
@@ -1931,7 +1927,7 @@ const Informe = (() => {
   // ctxS puede ser un estudiante o una lista (un informe por estudiante en el mismo PDF)
   function acumulado(ctxS, modo = 'estudiante') {
     const lista2 = Array.isArray(ctxS) ? ctxS : [ctxS], c0 = lista2[0];
-    const P = docCon(c0, pieDe(c0, modo === 'apoderado' ? 'Informe para padres y apoderados' : 'Informe del estudiante', lista2.length === 1 ? `${c0.est.nombre} · ${c0.cur.nombre}` : c0.cur.nombre));
+    const P = docCon(c0, pieDe(c0, modo === 'apoderado' ? 'Informe para padres y apoderados' : 'Informe del estudiante', lista2.length === 1 ? `${nombreCompleto(c0.est.nombre)} · ${c0.cur.nombre}` : c0.cur.nombre));
     lista2.forEach((c, i) => { if (i) nuevaPagina(P); const cp = c.sel.length > 0; if (cp) portadaEstudiante(P, c, modo); (modo === 'apoderado' ? seccionApoderado : seccionEstudiante)(P, { ...c, conPortada: cp }); });
     piePaginas(P); return P.doc.output('blob');
   }

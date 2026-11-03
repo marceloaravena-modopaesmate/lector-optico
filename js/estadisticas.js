@@ -28,7 +28,31 @@ const Estad = (() => {
     institucional: { brechaCurso: 0.08, ejeBajo: 0.5, participacion: 0.85, dispersion: 0.2, concentracionBaja: 0.4 },
   };
   let conf = JSON.parse(JSON.stringify(POR_DEFECTO));
+  // Nombres: las listas pueden venir como "Nombres Apellidos" o "Apellidos Nombres".
+  // Se detecta con apellidos frecuentes en Chile (o con una coma: "Apellidos, Nombres"); en Ajustes se puede fijar.
+  const sinTilde = (t) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const APELLIDOS = new Set(('gonzalez munoz rojas diaz perez soto contreras silva martinez sepulveda morales rodriguez lopez fuentes hernandez torres araya flores espinoza valenzuela castillo tapia reyes gutierrez castro pizarro alvarez vasquez sanchez fernandez ramirez carrasco gomez cortes herrera nunez jara vergara rivera figueroa riquelme garcia miranda bravo vera molina vega campos sandoval orellana cardenas olivares alarcon gallardo ortiz garrido salazar guzman henriquez saavedra navarro aguilera parra romero aravena vargas vidal medina pino lagos mella caceres muñoz leiva cofre zuniga yanez poblete ruiz mendez rios toro alvarado salinas pena ponce paredes palma acuna jimenez venegas escobar cisternas troncoso salas gaete quezada bustos osorio carvajal donoso ibarra arancibia moreno farias ramos godoy diaz lara inostroza quiroz hidalgo meza mora navarrete orellana sole marin burgos cid aguilar sierra lillo correa mardones villalobos ulloa vallejos uribe barra benavides castro calderon espinosa gajardo maldonado mansilla montecinos naranjo neira oyarzun pavez pinto retamal rubio sanhueza toledo urrutia valdes valdebenito vasquez vivanco zamora').split(' '));
+  let formatoNombre = 'auto';
+  const titulo = (t) => (t === t.toUpperCase() ? t.toLowerCase().replace(/(^|[\s-])(\p{L})/gu, (m, a, b) => a + b.toUpperCase()) : t);
+  function nombres(n) {
+    const limpio = String(n || '').trim().replace(/\s+/g, ' ');
+    if (limpio.includes(',')) {
+      const [ap, no] = limpio.split(',').map((x) => titulo(x.trim()));
+      return { pila: (no || ap).split(' ')[0], completo: [no, ap].filter(Boolean).join(' ') };
+    }
+    const p = titulo(limpio).split(' ');
+    let apellidoPrimero = formatoNombre === 'apellido';
+    if (formatoNombre === 'auto' && p.length >= 3) {
+      const es = (w) => APELLIDOS.has(sinTilde(w || ''));
+      apellidoPrimero = (es(p[0]) + es(p[1])) > (es(p[p.length - 1]) + es(p[p.length - 2]));
+    }
+    if (!apellidoPrimero || p.length < 2) return { pila: p[0] || '', completo: p.join(' ') };
+    const k = p.length >= 3 ? 2 : 1; // dos apellidos si hay al menos tres palabras
+    return { pila: p[k], completo: [...p.slice(k), ...p.slice(0, k)].join(' ') };
+  }
+
   function configurar(c) {
+    formatoNombre = (c && c.formatoNombre) || 'auto';
     conf = {
       escala: { ...POR_DEFECTO.escala, ...((c && c.escala) || {}) },
       umbrales: { ...POR_DEFECTO.umbrales, ...((c && c.umbrales) || {}) },
@@ -565,7 +589,7 @@ const Estad = (() => {
 
   return {
     TABLAS_PAES, tablaParaAsignatura, puntuables, contar,
-    TRAMOS, tramos, describir, validar, consolidar, ESTANDARES, CRITICA, BRECHA, POR_DEFECTO, configurar, get conf() { return conf; },
+    TRAMOS, tramos, describir, nombres, validar, consolidar, ESTANDARES, CRITICA, BRECHA, POR_DEFECTO, configurar, get conf() { return conf; },
     analizar, perfil, tecnico, confiabilidad, calidadPregunta, historial, nivel, historialNivel, alertas, grupos,
     tramoDe, nota, notaTexto, cortesDe, estandarDe, tieneTabla, puntajeDe, nivelDe, grupoEnsayo, fechaOrden, media,
   };

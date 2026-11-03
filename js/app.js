@@ -1078,11 +1078,11 @@
     const sufijo = elegidos.length === 1 ? Almacen.id(ultimo.nombre).slice(0, 30) : `${elegidos.length}_ensayos`;
     if (S.modo !== 'docente') {
       const ctxS = contextoEstudiante(cur, est, { ensayosEst: elegidos.map((e) => e.id), ejes: null, desde: '', hasta: '' });
-      return { est, cur, elegidos, nombre: `informe_${S.modo}_${Almacen.id(est.nombre)}_${sufijo}.pdf`, blob: Informe.acumulado(ctxS, S.modo) };
+      return { est, cur, elegidos, nombre: `informe_${S.modo}_${Almacen.id(Estad.nombres(est.nombre).completo)}_${sufijo}.pdf`, blob: Informe.acumulado(ctxS, S.modo) };
     }
     const base = contextoInforme(ultimo, elegidos.map((e) => e.id));
     const porEnsayo = elegidos.map((e) => (e.id === ultimo.id ? base : contextoInforme(e, [e.id])));
-    return { est, cur, elegidos, nombre: `informe_docente_${Almacen.id(est.nombre)}_${sufijo}.pdf`, blob: Informe.estudiante(base, porEnsayo, S.id, S.modo) };
+    return { est, cur, elegidos, nombre: `informe_docente_${Almacen.id(Estad.nombres(est.nombre).completo)}_${sufijo}.pdf`, blob: Informe.estudiante(base, porEnsayo, S.id, S.modo) };
   }
   async function descargarInformeEstudiante() {
     toast('Preparando el informe…');
@@ -1102,10 +1102,10 @@
       if (!para) { toast('Falta el correo.'); return; }
       const col = config().colegio || {};
       const ens = r.elegidos.length === 1 ? `el ensayo ${r.elegidos[0].nombre}` : `${r.elegidos.length} ensayos (${r.elegidos.map((e) => e.nombre).join(', ')})`;
-      const nombre = r.est.nombre.split(' ')[0];
-      const asunto = `Informe de resultados${apo ? ' de ' + r.est.nombre : ''} - ${r.elegidos.length === 1 ? r.elegidos[0].nombre : r.elegidos.length + ' ensayos'}`;
+      const nombre = Estad.nombres(r.est.nombre).pila;
+      const asunto = `Informe de resultados${apo ? ' de ' + Estad.nombres(r.est.nombre).completo : ''} - ${r.elegidos.length === 1 ? r.elegidos[0].nombre : r.elegidos.length + ' ensayos'}`;
       const cuerpo = apo
-        ? `Estimado(a) apoderado(a):\n\nLe envío adjunto el informe de resultados de ${r.est.nombre} (${r.cur.nombre}) en ${ens}. Incluye sus fortalezas, los aspectos por reforzar y orientaciones para acompañarlo(a) desde la casa.\n\nQuedo atento(a) a sus consultas.\n\nSaludos cordiales${col.nombre ? ',\n' + col.nombre : ''}`
+        ? `Estimado(a) apoderado(a):\n\nLe envío adjunto el informe de resultados de ${Estad.nombres(r.est.nombre).completo} (${r.cur.nombre}) en ${ens}. Incluye sus fortalezas, los aspectos por reforzar y orientaciones para acompañarlo(a) desde la casa.\n\nQuedo atento(a) a sus consultas.\n\nSaludos cordiales${col.nombre ? ',\n' + col.nombre : ''}`
         : `Hola ${nombre}:\n\nTe envío adjunto tu informe de resultados en ${ens}. Ahí puedes ver en qué te fue bien, qué preguntas conviene repasar y un plan para seguir mejorando.\n\nCualquier duda, me preguntas en clases.\n\nSaludos${col.nombre ? ',\n' + col.nombre : ''}`;
       await descargar(r.nombre, r.blob);
       // El correo se abre con un toque del docente en la ventana siguiente: abrirlo solo tras la descarga lo bloquean muchos navegadores
@@ -1290,7 +1290,7 @@
         <div class="lista-elegir">${disponibles.map((e) => opcion('inf-ens-est', e.id, S.ensayosEst.includes(e.id), e.nombre, [e.asignatura, e.fecha, `${e.preguntas.filter((p) => !p.piloto).length} preguntas`].filter(Boolean).join(' · '))).join('') || '<span class="nota">No hay ensayos en ese período.</span>'}</div>
         ${ejes.length > 1 ? `<span class="etiqueta">Temáticas</span><div class="filtros">${chip('inf-eje', '__todas', !S.ejes, 'Todas')}${ejes.map((x) => chip('inf-eje', x, !!S.ejes && S.ejes.includes(x), x)).join('')}</div>` : ''}`;
     }
-    if (S.dest === 'docente' || S.dest === 'completo') opciones += `<button class="opcion" data-accion="inf-fichas" aria-pressed="${S.fichas}"><span class="caja">${S.fichas ? ICONO.check : ''}</span><span class="principal"><b>Incluir fichas técnicas de cada estudiante</b><span>Una página por estudiante, con lugar en el curso y análisis técnico</span></span></button>`;
+    if (S.dest === 'docente' || S.dest === 'completo') opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-fichas" aria-pressed="${S.fichas}"><span class="caja">${S.fichas ? ICONO.check : ''}</span><span class="principal"><b>Incluir fichas técnicas de cada estudiante</b><span>Agrega una página por estudiante, con su lugar en el curso y su análisis técnico.</span></span></button></div>`;
     if (S.dest === 'directivo') opciones += '<span class="nota">El informe directivo no incluye nombres de estudiantes.</span>';
     // Paso 6: vista previa
     const cursosSel = S.cursos.map((id) => Almacen.obtener('cursos', id)).filter(Boolean);
@@ -1411,6 +1411,11 @@
           <span style="font-size:14px;color:var(--texto-2)">Descarga todos tus ensayos, cursos y resultados en un archivo. Sirve para cambiar de equipo o recuperar datos.</span>
           <div class="fila-botones"><button class="btn" data-accion="respaldo">${ICONO.bajar} Descargar</button><label class="btn" for="a-respaldo">${ICONO.subir} Restaurar</label></div>
           <input type="file" id="a-respaldo" accept=".json" class="oculto-visual" data-archivo="respaldo">
+        </section>
+        <section class="tarjeta pad"><span class="etiqueta">Nombres de los estudiantes</span>
+          <label class="campo" for="a-nombres">¿Cómo vienen escritos en tus listas?<select id="a-nombres" data-cambio="formato-nombre">
+            ${[['auto', 'Detectar automáticamente'], ['nombre', 'Nombres y luego apellidos (Josefa Morales Tapia)'], ['apellido', 'Apellidos y luego nombres (Morales Tapia Josefa)']].map(([v, t]) => `<option value="${v}" ${(config().formatoNombre || 'auto') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+          <span class="nota">Los informes del estudiante y del apoderado siempre se dirigen al estudiante por su nombre y lo escriben como "Nombres Apellidos".</span>
         </section>
         <section class="tarjeta pad"><span class="etiqueta">Plantillas Excel</span>
           <div class="fila-botones"><button class="btn" data-accion="plantilla" data-a="plantilla_ensayo.xlsx">Ensayo</button><button class="btn" data-accion="plantilla" data-a="plantilla_lista_curso.xlsx">Lista de curso</button></div>
@@ -2072,6 +2077,7 @@
     const el = ev.target;
     if (el.dataset.cambio === 'ensayo') { await fijarConfig({ ensayo: el.value || null }); E.inf = null; render(); }
     if (el.dataset.cambio === 'curso') { await fijarConfig({ curso: el.value || null }); E.inf = null; render(); }
+    if (el.dataset.cambio === 'formato-nombre') { await fijarConfig({ formatoNombre: el.value }); toast('Guardado'); E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'inf-est') { const S = estadoInformes(); S.todos = el.value === '__todos'; S.est = S.todos ? null : el.value; S.ensayosEst = null; S.ejes = null; E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'inf-desde' || el.dataset.cambio === 'inf-hasta') { const S = estadoInformes(); S[el.dataset.cambio.slice(4)] = el.value; S.ensayosEst = null; E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'estudiante' && el.value) {
