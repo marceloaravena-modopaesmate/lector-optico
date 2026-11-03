@@ -477,6 +477,21 @@ const Lector = (() => {
     return datos;
   }
 
+  // Recorte de la línea "Nombre:" de la hoja (para leer el nombre si falla el QR), ampliado al doble
+  function recorteNombre(hoja) {
+    const x0 = 27.5, x1 = Diseno.QR.x - 5, y0 = 24.8, y1 = 32.8, k = 2;
+    const izq = Math.round(x0 * PX_MM), arr = Math.round(y0 * PX_MM);
+    const W = Math.round((x1 - x0) * PX_MM) * k, A = Math.round((y1 - y0) * PX_MM) * k;
+    const datos = new ImageData(W, A);
+    for (let y = 0; y < A; y++) for (let x = 0; x < W; x++) {
+      const g = hoja.gris[(arr + Math.floor(y / k)) * hoja.ancho + izq + Math.floor(x / k)];
+      const i = (y * W + x) * 4;
+      datos.data[i] = datos.data[i + 1] = datos.data[i + 2] = g;
+      datos.data[i + 3] = 255;
+    }
+    return datos;
+  }
+
   // Búsqueda rápida de las esquinas en un cuadro de video (para la captura automática)
   function detectar(imageData) {
     const img = reducir(aGris(imageData), 640);
@@ -484,5 +499,5 @@ const Lector = (() => {
     return marcas ? marcas.map((m) => [m.cx / img.escala, m.cy / img.escala]) : null;
   }
 
-  return { procesar, detectar, recortePregunta, interpretarQR, UMBRAL, PX_MM };
+  return { procesar, detectar, recortePregunta, recorteNombre, interpretarQR, UMBRAL, PX_MM };
 })();

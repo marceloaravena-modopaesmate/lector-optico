@@ -383,6 +383,7 @@
     const avisos = [];
     if (rev.error) avisos.push(`<div class="aviso mal">${ICONO.alerta}<span>${h(rev.error)}</span></div>`);
     if (pendientes) avisos.push(`<div class="aviso rev">${ICONO.alerta}<span><b>${pendientes} por revisar:</b> toca la pregunta y elige la respuesta.</span></div>`);
+    if (rev.sugerido && est && rev.sugerido.estudiante.id !== est.id) avisos.push(`<div class="aviso rev respaldo">${ICONO.alerta}<span>El N° de lista marcado es de <b>${h(est.nombre)}</b>, pero el nombre escrito en la hoja parece ser <b>${h(rev.sugerido.estudiante.nombre)}</b> (${h(rev.sugerido.curso.nombre)}).</span><div class="fila-botones"><button class="btn" data-accion="usar-nombre">Es de ${h(Estad.nombres(rev.sugerido.estudiante.nombre).pila)}</button></div></div>`);
     if (rev.yaExistia) avisos.push(`<div class="aviso rev">${ICONO.alerta}<span>Este estudiante ya tenía una hoja corregida. Al guardar se reemplaza.</span></div>`);
     let selector = '';
     // Sin QR del ensayo, el docente puede indicar a qué ensayo corresponde la hoja
@@ -394,11 +395,12 @@
     if (!est) {
       const cur = rev.curso || cursoActivo();
       selector = `<div class="tarjeta pad"><span class="etiqueta">¿De quién es esta hoja?</span>
-        <span style="font-size:14px;color:var(--texto-2)">${h(rev.motivoSinEstudiante || 'No pude leer el QR ni el N° de lista.')}</span>
-        <label class="campo" for="sel-estudiante">Estudiante de ${h(cur ? cur.nombre : '')}
+        <span style="font-size:14px;color:var(--texto-2)">${rev.leyendoNombre ? 'No pude leer el QR. Estoy leyendo el nombre escrito en la hoja…' : h(rev.motivoSinEstudiante || 'No pude leer el QR ni el N° de lista.')}</span>
+        ${(rev.candidatosNombre || []).length ? `<div class="fila-botones" style="flex-wrap:wrap">${rev.candidatosNombre.map((c, i) => `<button class="btn" data-accion="elegir-candidato" data-a="${i}">${h(c.estudiante.nombre)}${c.curso.id !== (cur && cur.id) ? ' · ' + h(c.curso.nombre) : ''}</button>`).join('')}</div>` : ''}
+        <label class="campo" for="sel-estudiante">${(rev.candidatosNombre || []).length ? 'O elige otro estudiante' : 'Estudiante'} de ${h(cur ? cur.nombre : '')}
         <select id="sel-estudiante" data-cambio="estudiante"><option value="">Elige…</option>${(cur ? cur.estudiantes : []).map((e) => `<option value="${h(e.id)}">${e.lista}. ${h(e.nombre)}</option>`).join('')}</select></label></div>`;
     }
-    const sub = est ? `N° ${est.lista} · ${rev.curso.nombre} · ${{ qr: 'leído por QR', lista: 'por N° de lista', manual: 'elegido a mano', guardada: 'hoja guardada' }[rev.origen]}` : 'Estudiante sin identificar';
+    const sub = est ? `N° ${est.lista} · ${rev.curso.nombre} · ${{ qr: 'leído por QR', lista: 'por N° de lista', nombre: 'leído por el nombre', manual: 'elegido a mano', guardada: 'hoja guardada' }[rev.origen]}` : 'Estudiante sin identificar';
     const puedeGuardar = !pendientes && est;
     return `<div class="pantalla sin-nav">
       <header class="cabecera" style="background:var(--superficie);border-bottom:1px solid var(--borde)">
@@ -1701,6 +1703,107 @@
     siguienteDeCola();
   }
 
+  // Lectura del nombre escrito en la hoja (si falla el QR), con Tesseract.js. Se carga solo cuando hace falta.
+  const OCR = (() => {
+    const LOCAL = 'lib/ocr/';
+    const CDN = {
+      js: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js',
+      worker: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/worker.min.js',
+      core: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.1',
+      lang: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/spa@1.0.0/4.0.0_best_int',
+    };
+    const script = (url) => new Promise((ok, mal) => {
+      const sc = document.createElement('script'); sc.src = url;
+      sc.onload = () => (window.Tesseract ? ok() : mal(new Error('sin Tesseract')));
+      sc.onerror = () => { sc.remove(); mal(new Error('no cargó ' + url)); };
+      document.head.appendChild(sc);
+    });
+    let trabajador = null;
+    function iniciar() {
+      if (trabajador) return trabajador;
+      trabajador = (async () => {
+        let local = true;
+        if (!window.Tesseract) { try { await script(LOCAL + 'tesseract.min.js'); } catch (e) { local = false; await script(CDN.js); } }
+        const abs = (u) => new URL(u, location.href).href;
+        const rutas = local ? { workerPath: abs(LOCAL + 'worker.min.js'), corePath: abs(LOCAL), langPath: abs(LOCAL) }
+          : { workerPath: CDN.worker, corePath: CDN.core, langPath: CDN.lang };
+        const w = await window.Tesseract.createWorker('spa', 1, { ...rutas, gzip: true });
+        await w.setParameters({ tessedit_pageseg_mode: '7' });
+        return w;
+      })().catch((e) => { trabajador = null; throw e; });
+      return trabajador;
+    }
+    async function leer(imageData) {
+      const w = await iniciar();
+      const c = document.createElement('canvas'); c.width = imageData.width; c.height = imageData.height;
+      c.getContext('2d').putImageData(imageData, 0, 0);
+      const { data } = await w.recognize(c);
+      return (data.text || '').replace(/\s+/g, ' ').trim();
+    }
+    return { leer, iniciar };
+  })();
+
+  const sinTildes = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z]+/g, ' ').trim();
+  function parecido(a, b) {
+    if (a === b) return 1;
+    const m = a.length, n = b.length; if (!m || !n) return 0;
+    let prev = Array.from({ length: n + 1 }, (_, j) => j);
+    for (let i = 1; i <= m; i++) {
+      const cur = [i];
+      for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prev = cur;
+    }
+    return 1 - prev[n] / Math.max(m, n);
+  }
+  // Busca al estudiante cuyo nombre se parece más al texto leído. Devuelve null si no hay uno claro.
+  function emparejarNombre(texto, candidatos) {
+    const leidas = sinTildes(texto).split(' ').filter((w) => w.length >= 3);
+    if (!leidas.length) return null;
+    const puntajes = candidatos.map((c) => {
+      const propias = sinTildes(c.estudiante.nombre).split(' ').filter((w) => w.length >= 2);
+      const pares = [];
+      leidas.forEach((l, i) => propias.forEach((p, j) => pares.push([parecido(l, p), i, j])));
+      pares.sort((a, b) => b[0] - a[0]);
+      const usadaL = new Set(), usadaP = new Set(), mejores = [];
+      for (const [v, i, j] of pares) { if (usadaL.has(i) || usadaP.has(j)) continue; usadaL.add(i); usadaP.add(j); mejores.push(v); }
+      const k = Math.min(3, leidas.length, propias.length);
+      const top = mejores.slice(0, k);
+      return { ...c, puntaje: top.reduce((a, b) => a + b, 0) / Math.max(1, k), palabras: k };
+    }).sort((a, b) => b.puntaje - a.puntaje);
+    const [mejor, segundo] = puntajes;
+    if (!mejor || mejor.puntaje < 0.72) return null;
+    if (segundo && mejor.puntaje - segundo.puntaje < 0.12) {
+      return { dudosos: puntajes.filter((c) => c.puntaje >= mejor.puntaje - 0.12).slice(0, 3) };
+    }
+    return mejor;
+  }
+  async function identificarPorNombre(rev) {
+    rev.leyendoNombre = true;
+    let texto = '';
+    try { texto = await OCR.leer(Lector.recorteNombre(rev.hoja)); } catch (e) { console.warn('No pude leer el nombre', e); }
+    rev.leyendoNombre = false;
+    rev.nombreLeido = texto;
+    const delCurso = (c) => (c ? c.estudiantes.map((e) => ({ curso: c, estudiante: e })) : []);
+    let m = texto ? emparejarNombre(texto, delCurso(rev.curso || cursoActivo())) : null;
+    if (!m && texto) m = emparejarNombre(texto, cursos().flatMap(delCurso));
+    if (m && m.dudosos) {
+      if (!rev.estudiante) {
+        rev.candidatosNombre = m.dudosos;
+        rev.motivoSinEstudiante = `No pude leer el QR. En el nombre leí "${texto}". ¿Es alguno de estos estudiantes?`;
+      }
+    } else if (m) {
+      if (!rev.estudiante) {
+        rev.curso = m.curso; rev.estudiante = m.estudiante; rev.origen = 'nombre';
+        rev.yaExistia = !!hojasDe(rev.ensayo, m.curso)[m.estudiante.id];
+      } else if (rev.origen === 'lista' && rev.estudiante.id !== m.estudiante.id) {
+        rev.sugerido = m;
+      }
+    } else if (!rev.estudiante && texto) {
+      rev.motivoSinEstudiante = `No pude leer el QR. En el nombre leí "${texto}", pero no sé con seguridad de quién es. Elige al estudiante.`;
+    }
+    if (E.revision === rev && E.pantalla === 'revision') { E.mantenerScroll = true; render(); }
+  }
+
   // Fotos HEIC/HEIF (iPhone): si el navegador no las abre, se convierten a JPEG con heic2any
   const esHeic = (f) => /image\/hei[cf]/i.test(f.type || '') || /\.hei[cf]$/i.test(f.name || '');
   let cargaHeic = null;
@@ -1801,6 +1904,7 @@
       yaExistia: !!(estudiante && hojasDe(ensayo, curso)[estudiante.id]),
     };
     E.pantalla = 'revision';
+    if (origen !== 'qr' && r.hoja && cursos().some((c) => c.estudiantes.length)) identificarPorNombre(E.revision);
     render();
   }
 
@@ -2038,6 +2142,18 @@
     auto: () => { E.camara.auto = !E.camara.auto; const b = document.querySelector('.interruptor'); if (b) b.setAttribute('aria-checked', E.camara.auto); },
     capturar: () => capturarVideo(),
     repetir: () => { E.revision = null; ir('camara'); },
+    'elegir-candidato': (a) => {
+      const rev = E.revision, c = rev && (rev.candidatosNombre || [])[Number(a)]; if (!c) return;
+      rev.curso = c.curso; rev.estudiante = c.estudiante; rev.origen = 'nombre'; rev.candidatosNombre = null;
+      rev.yaExistia = !!hojasDe(rev.ensayo, rev.curso)[rev.estudiante.id];
+      E.mantenerScroll = true; render();
+    },
+    'usar-nombre': () => {
+      const rev = E.revision; if (!rev || !rev.sugerido) return;
+      rev.curso = rev.sugerido.curso; rev.estudiante = rev.sugerido.estudiante; rev.origen = 'nombre'; rev.sugerido = null;
+      rev.yaExistia = !!hojasDe(rev.ensayo, rev.curso)[rev.estudiante.id];
+      E.mantenerScroll = true; render();
+    },
     pregunta: (a) => { E.hojaPregunta = parseInt(a, 10); E.mantenerScroll = true; render(); },
     'cerrar-hoja': (a, ev) => { if (ev.target.closest('[data-dentro]') && !ev.target.closest('.btn-redondo')) return; E.hojaPregunta = null; E.mantenerScroll = true; render(); },
     elegir: (a) => {
