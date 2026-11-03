@@ -566,6 +566,7 @@
           <div class="fila-botones"><button class="btn" data-accion="hojas-pdf-curso">PDF</button><button class="btn" data-accion="hojas-tex-curso">LaTeX</button></div>`
           : '<span style="font-size:14px;color:var(--texto-2)">Crea un ensayo para generar las hojas.</span>'}
         </section>
+        <button class="btn grande cta" data-accion="envio-curso">✉ Enviar resultados por correo a todo el curso</button>
         <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 class="titulo-seccion">Estudiantes</h2>
           <button class="btn" style="min-height:36px" data-accion="nuevo-est">+ Agregar</button></div>
         <span class="nota">Toca un estudiante para editar su perfil: nombre, curso, RUT y correos.</span>
@@ -1109,7 +1110,43 @@
       a.target = '_top'; a.rel = 'noopener';
       document.body.appendChild(a); a.click(); a.remove();
       toast(`Adjunta el archivo ${r.nombre} antes de enviar`);
+      return true;
     } catch (e) { console.error(e); toast('No se pudo preparar el correo: ' + e.message); }
+    return false;
+  }
+
+  // Envío a todo el curso: una fila por estudiante, cada una prepara su correo con su propio informe
+  function pEnvioCurso() {
+    const c = Almacen.obtener('cursos', E.cursoAbierto);
+    if (!c) return pCursos();
+    const V = E.envio = E.envio && E.envio.cur === c.id ? E.envio : { cur: c.id, modo: 'estudiante', grupo: '__todos', enviados: {} };
+    const grupos = [...new Set(ensayosConHojas(c).map((e) => Estad.grupoEnsayo(e)))];
+    if (V.grupo !== '__todos' && !grupos.includes(V.grupo)) V.grupo = '__todos';
+    const apo = V.modo === 'apoderado';
+    const filas = [...c.estudiantes].sort((a, b) => a.lista - b.lista).map((e) => {
+      const suyos = ensayosDelEstudiante(e.id, c).filter((o) => V.grupo === '__todos' || Estad.grupoEnsayo(o.e) === V.grupo);
+      return { e, n: suyos.length, correo: apo ? e.correoApoderado : e.correo, enviado: V.enviados[`${V.modo}:${e.id}`] };
+    });
+    const listos = filas.filter((f) => f.correo && f.n), sinCorreo = filas.filter((f) => !f.correo).length, hechos = filas.filter((f) => f.enviado).length;
+    return `<div class="pantalla sin-nav">${cabecera('Enviar resultados por correo', c.nombre, 'curso-detalle')}
+      <div class="cuerpo">
+        <section class="tarjeta pad"><span class="etiqueta">¿A quién le envías?</span>
+          <div class="segmento"><button data-accion="envio-modo" data-a="estudiante" aria-pressed="${!apo}">Estudiantes</button><button data-accion="envio-modo" data-a="apoderado" aria-pressed="${apo}">Apoderados</button></div>
+          ${grupos.length > 1 ? `<span class="etiqueta">Ensayos que incluye</span><div class="filtros">${['__todos', ...grupos].map((g) => `<button data-accion="envio-grupo" data-a="${h(g)}" aria-pressed="${V.grupo === g}">${g === '__todos' ? 'Todos' : h(g)}</button>`).join('')}</div>` : ''}
+          <span class="nota">Toca <b>Enviar</b> en cada fila: se descarga el PDF de ese estudiante y se abre tu correo con el destinatario, el asunto y el mensaje listos. Adjuntas el PDF, envías y vuelves aquí para el siguiente. La app no puede enviar correos sola porque no tiene un servidor de correo.</span>
+        </section>
+        <div class="cifras">
+          <div class="tarjeta"><span>Listos para enviar</span><b class="num">${listos.length}</b></div>
+          <div class="tarjeta"><span>Preparados</span><b class="num" style="color:var(--azul-texto)">${hechos}</b></div>
+          <div class="tarjeta"><span>Sin correo</span><b class="num">${sinCorreo}</b></div>
+        </div>
+        <div class="tarjeta lista">${filas.map((f) => `<div class="item">
+          <span class="n num">${f.e.lista}</span>
+          <span class="principal"><b>${h(f.e.nombre)}</b><span>${f.correo ? h(f.correo) : `<button class="btn-texto" data-accion="editar-est" data-a="${h(f.e.id)}">Sin correo: agregar</button>`}${f.correo && !f.n ? ' · sin hojas corregidas' : ''}</span></span>
+          ${f.correo && f.n ? `<button class="btn ${f.enviado ? '' : 'primario'}" style="min-height:38px;padding:0 14px" data-accion="envio-uno" data-a="${h(f.e.id)}">${f.enviado ? '✓ Preparado' : 'Enviar'}</button>` : ''}
+        </div>`).join('')}</div>
+        <span class="nota">Los correos se cargan en la lista del curso (columnas E y F de la plantilla) o en el perfil de cada estudiante.</span>
+      </div></div>`;
   }
 
   // Tablero del colegio: cada nivel y asignatura con resultados
@@ -1426,7 +1463,7 @@
 
   const PANTALLAS = {
     inicio: pInicio, camara: pCamara, revision: pRevision, curso: pCurso, ensayos: pEnsayos,
-    'ensayo': pEnsayo, cursos: pCursos, 'curso-detalle': pCursoDetalle, 'perfil-est': pPerfilEstudiante, estadisticas: pEstadisticas,
+    'ensayo': pEnsayo, cursos: pCursos, 'curso-detalle': pCursoDetalle, 'perfil-est': pPerfilEstudiante, 'envio-curso': pEnvioCurso, estadisticas: pEstadisticas,
     informes: pInformes, ajustes: pAjustes, ficha: pFicha, colegio: pColegio,
   };
 
@@ -1918,6 +1955,14 @@
     'editar-est': (a) => { E.estEditado = a; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'nuevo-est': () => { E.estEditado = null; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'guardar-est': () => guardarPerfilEstudiante(),
+    'envio-curso': () => { E.pantalla = 'envio-curso'; window.scrollTo(0, 0); render(); },
+    'envio-modo': (a) => { E.envio.modo = a; E.mantenerScroll = true; render(); },
+    'envio-grupo': (a) => { E.envio.grupo = a; E.mantenerScroll = true; render(); },
+    'envio-uno': async (a) => {
+      const V = E.envio, c = Almacen.obtener('cursos', V.cur);
+      E.fichaSel = { id: a, cur: c.id, modo: V.modo, marcados: ensayosDelEstudiante(a, c).filter((o) => V.grupo === '__todos' || Estad.grupoEnsayo(o.e) === V.grupo).map((o) => o.e.id) };
+      if (await enviarInformeEstudiante()) { V.enviados[`${V.modo}:${a}`] = true; E.mantenerScroll = true; render(); }
+    },
     'enviar-desde-perfil': (a) => {
       const c = Almacen.obtener('cursos', E.cursoAbierto);
       E.fichaSel = { id: E.estEditado, cur: c.id, modo: a, marcados: ensayosDelEstudiante(E.estEditado, c).map((o) => o.e.id) };
