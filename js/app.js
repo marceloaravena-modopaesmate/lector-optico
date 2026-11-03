@@ -1760,32 +1760,51 @@
       const nombre = e.curso || nombreArchivo.replace(/\.[^.]+$/, '');
       (grupos[nombre] = grupos[nombre] || []).push(e);
     });
-    let ultimo = null;
+    let ultimo = null, conservados = 0;
     for (const [nombre, lista] of Object.entries(grupos)) {
-      const id = Almacen.id(nombre);
-      const curso = { id, nombre, estudiantes: [] };
+      // Si ya hay un curso con ese nombre (aunque su código sea otro), se actualiza ese mismo curso
+      const mismo = cursos().find((c2) => Almacen.id(c2.nombre) === Almacen.id(nombre));
+      const id = mismo ? mismo.id : Almacen.id(nombre);
       const previo = Almacen.obtener('cursos', id);
+      const curso = { ...(previo || {}), id, nombre: previo ? previo.nombre : nombre, estudiantes: [] };
       const antes = new Map(((previo && previo.estudiantes) || []).map((e) => [e.id, e]));
       curso.estudiantes = lista.map((e) => ({ lista: e.lista, nombre: e.nombre, rut: e.rut }));
-      const norm = (t) => (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
-      const previos = [...antes.values()];
+      const norm = (t) => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const previos = [...antes.values()], tomados = new Set();
+      const nombresNuevos = new Set(lista.map((e) => norm(e.nombre)));
+      // Reconoce a cada estudiante que ya existía para conservar su código y así sus hojas corregidas.
+      // Orden: RUT, luego nombre y, solo si nada de eso calza, el mismo N° de lista (si ese estudiante no aparece con su nombre en la planilla).
+      const buscar = (e) => {
+        const libre = (x) => x && !tomados.has(x.id);
+        return previos.find((x) => libre(x) && e.rut && x.rut && Almacen.id(x.rut) === Almacen.id(e.rut))
+          || previos.find((x) => libre(x) && norm(x.nombre) === norm(e.nombre))
+          || [antes.get(idEstudiante(curso, e))].find((x) => libre(x) && !nombresNuevos.has(norm(x.nombre)));
+      };
+      const usados = new Set(cursos().filter((c2) => c2.id !== id).flatMap((c2) => c2.estudiantes.map((y) => y.id)));
       curso.estudiantes.forEach((e, k) => {
-        // Si el estudiante ya existía (mismo código, RUT o nombre) conserva su código, para no perder sus hojas
-        const ya = antes.get(idEstudiante(curso, e)) || previos.find((x) => (e.rut && x.rut && Almacen.id(x.rut) === Almacen.id(e.rut)) || norm(x.nombre) === norm(e.nombre));
-        e.id = ya ? ya.id : idEstudiante(curso, e);
+        const ya = buscar(e);
+        if (ya) e.id = ya.id;
+        else { let nid = idEstudiante(curso, e), j = 2; while (usados.has(nid) || tomados.has(nid) || antes.has(nid)) nid = idEstudiante(curso, e) + '-' + j++; e.id = nid; }
+        tomados.add(e.id);
         // Los correos de la planilla mandan; si vienen vacíos se conservan los que ya estaban guardados
-        const a = antes.get(e.id) || {};
+        const a = (ya || {});
         const correo = lista[k].correo || a.correo, correoApoderado = lista[k].correoApoderado || a.correoApoderado;
         if (correo) e.correo = correo;
         if (correoApoderado) e.correoApoderado = correoApoderado;
       });
+      // Quien ya tenía hojas corregidas y no viene en la planilla se mantiene, para no perder sus resultados
+      const conHojas = new Set(Almacen.lista('resultados').filter((r) => r.curso === id).flatMap((r) => Object.keys(r.hojas || {})));
+      const mantenidos = previos.filter((x) => !tomados.has(x.id) && conHojas.has(x.id));
+      curso.estudiantes.push(...mantenidos);
+      conservados += mantenidos.length;
       await Almacen.guardar('cursos', id, curso);
       ultimo = id;
     }
     if (!config().curso && ultimo) await fijarConfig({ curso: ultimo });
     const n = Object.keys(grupos).length;
     const malos = estudiantes.correosInvalidos ? `. ${estudiantes.correosInvalidos} correo${estudiantes.correosInvalidos === 1 ? ' no es válido y quedó' : 's no son válidos y quedaron'} en blanco` : '';
-    toast((n === 1 ? `Curso ${Object.keys(grupos)[0]} cargado con ${estudiantes.length} estudiantes` : `${n} cursos cargados`) + malos);
+    const extra = conservados ? `. ${conservados === 1 ? 'Mantuve a 1 estudiante que no venía en la planilla porque tiene' : `Mantuve a ${conservados} estudiantes que no venían en la planilla porque tienen`} hojas corregidas` : '';
+    toast((n === 1 ? `Curso ${Object.keys(grupos)[0]} cargado con ${estudiantes.length} estudiantes` : `${n} cursos cargados`) + malos + extra);
   }
 
   async function generarHojas(ensayo, curso, formato) {
