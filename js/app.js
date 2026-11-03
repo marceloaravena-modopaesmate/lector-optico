@@ -598,8 +598,22 @@
           <button class="btn primario" data-accion="guardar-est">${nuevo ? 'Agregar estudiante' : 'Guardar cambios'}</button>
           ${nuevo ? '' : `<span class="nota">Código del estudiante: ${h(e.id)}. No cambia al editar, así sus hojas corregidas y el QR de su hoja siguen funcionando.${conHojas ? ` Tiene hojas en ${conHojas} ensayo${conHojas === 1 ? '' : 's'}; si lo cambias de curso, sus hojas se van con él.` : ''}</span>`}
         </section>
+        ${nuevo ? '' : seccionEnvio(e, c)}
         ${nuevo ? '' : `<button class="btn" style="color:var(--mal-texto)" data-accion="borrar-est">Quitar del curso</button>`}
       </div></div>`;
+  }
+  // Envío individual del informe desde el perfil: incluye todos los ensayos que rindió en este curso
+  function seccionEnvio(e, c) {
+    const n = ensayosDelEstudiante(e.id, c).length;
+    const boton = (modo, correo, quien) => correo
+      ? `<button class="btn" style="flex-direction:column;gap:2px;padding:10px" data-accion="enviar-desde-perfil" data-a="${modo}" ${n ? '' : 'disabled'}>✉ Enviar informe ${quien}<small style="display:block;font-weight:500;color:var(--texto-2)">${h(correo)}</small></button>`
+      : `<button class="btn" style="flex-direction:column;gap:2px;padding:10px" disabled>✉ Enviar informe ${quien}<small style="display:block;font-weight:500">Falta su correo</small></button>`;
+    return `<section class="tarjeta pad"><span class="etiqueta">Enviar resultados por correo</span>
+      <span class="nota">${n ? `El informe incluye ${n === 1 ? 'el ensayo que rindió' : `los ${n} ensayos que rindió`}. Se descarga el PDF y se abre tu correo con el destinatario, el asunto y el mensaje listos: solo adjuntas el PDF y envías.` : 'Todavía no tiene hojas corregidas en este curso.'}</span>
+      ${boton('estudiante', e.correo, 'al estudiante')}
+      ${boton('apoderado', e.correoApoderado, 'al apoderado')}
+      <span class="nota">Para elegir qué ensayos incluir, usa su ficha en Estadísticas.</span>
+    </section>`;
   }
   async function guardarPerfilEstudiante() {
     const val = (id) => document.getElementById(id).value.trim();
@@ -1026,7 +1040,7 @@
   // En el perfil: elegir ensayos y versión, y descargar el informe del estudiante
   function seccionInformeEstudiante(est, cur) {
     const suyos = ensayosDelEstudiante(est.id, cur);
-    if (!E.fichaSel || E.fichaSel.id !== est.id) E.fichaSel = { id: est.id, marcados: suyos.map((o) => o.e.id), modo: 'estudiante' };
+    if (!E.fichaSel || E.fichaSel.id !== est.id || E.fichaSel.cur) E.fichaSel = { id: est.id, marcados: suyos.map((o) => o.e.id), modo: 'estudiante' };
     const S = E.fichaSel, n = S.marcados.filter((id) => suyos.some((o) => o.e.id === id)).length;
     return `<section class="tarjeta pad informe-estudiante"><span class="etiqueta">Informe PDF de ${h(corto(est.nombre))}</span>
       <span class="nota">Marca los ensayos que quieres incluir. Con más de uno, el informe parte con un resumen de todos y sigue con el detalle de cada ensayo.</span>
@@ -1051,7 +1065,7 @@
   }
   // Arma el PDF del perfil según los ensayos marcados y el destinatario elegido
   function crearInformeEstudiante() {
-    const S = E.fichaSel, cur = cursoActivo();
+    const S = E.fichaSel, cur = (S.cur && Almacen.obtener('cursos', S.cur)) || cursoActivo();
     const elegidos = ensayosDelEstudiante(S.id, cur).map((o) => o.e).filter((e) => S.marcados.includes(e.id))
       .sort((a, b) => Estad.fechaOrden(a).localeCompare(Estad.fechaOrden(b)));
     if (!elegidos.length) return null;
@@ -1904,6 +1918,11 @@
     'editar-est': (a) => { E.estEditado = a; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'nuevo-est': () => { E.estEditado = null; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'guardar-est': () => guardarPerfilEstudiante(),
+    'enviar-desde-perfil': (a) => {
+      const c = Almacen.obtener('cursos', E.cursoAbierto);
+      E.fichaSel = { id: E.estEditado, cur: c.id, modo: a, marcados: ensayosDelEstudiante(E.estEditado, c).map((o) => o.e.id) };
+      enviarInformeEstudiante();
+    },
     'perfil-desde-ficha': (a) => { const c = cursoActivo(); if (!c) return; E.cursoAbierto = c.id; E.estEditado = a; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'borrar-est': () => {
       const c = Almacen.obtener('cursos', E.cursoAbierto), est = c && c.estudiantes.find((x) => x.id === E.estEditado);
