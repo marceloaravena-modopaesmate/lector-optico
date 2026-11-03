@@ -2411,8 +2411,7 @@ const Informe = (() => {
     vinetas(P, [
       `Acordar un horario fijo de estudio, por ejemplo 30 a 40 minutos, tres veces por semana${debil && debil.logro < 0.6 ? `, dedicando una parte a ${debil.nombre}` : ''}.`,
       `Pedirle a ${pila} que explique cómo resolvió un ejercicio: ayuda más que revisar solo si la respuesta está buena.`,
-      'Cuidar las condiciones de estudio: un lugar tranquilo, sin celular cerca, y pausas cortas cada 25 minutos.',
-      'Aprovechar situaciones cotidianas para practicar: calcular descuentos, comparar precios, leer gráficos de las noticias o estimar tiempos de viaje.',
+      'Cuidar las condiciones de estudio (un lugar tranquilo, sin celular cerca) y aprovechar situaciones cotidianas para practicar, como calcular descuentos o leer gráficos de las noticias.',
     ], { tam: 10 });
     titulo(P, 'Mensaje final', 5, 25);
     const mejora = C2.find((g) => g.cambio != null && g.cambio >= 0.03);
@@ -2427,8 +2426,7 @@ const Informe = (() => {
       conP ? 'Puntaje PAES estimado: conversión del resultado a la escala de la PAES (100 a 1000) con la tabla del ensayo. Es referencial.' : 'Nota: calificación de 1,0 a 7,0 calculada con la escala de exigencia del colegio.',
       'Temática o eje: grupo de contenidos de la asignatura, por ejemplo números o geometría.',
       'Habilidad: lo que se pide hacer con el contenido, como resolver problemas, representar o argumentar.',
-    ], { tam: 9.5 });
-    parrafo(P, 'Este informe muestra solo los resultados de su estudiante: no incluye rankings ni comparaciones con otros estudiantes.', { color: C.texto2, tam: 8.5 });
+    ], { tam: 9 });
   }
 
 
