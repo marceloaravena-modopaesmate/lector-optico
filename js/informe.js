@@ -1598,6 +1598,135 @@ const Informe = (() => {
     const o = sel.slice().sort((a, b) => Estad.fechaOrden(a.ens).localeCompare(Estad.fechaOrden(b.ens))).map((s) => s.ens.fecha).filter(Boolean);
     return o.length === 1 || o[0] === o[o.length - 1] ? o[0] : `${o[0]} al ${o[o.length - 1]}`;
   }
+  // Lectura pedagógica de un grupo consolidado (una asignatura), con voz de docente.
+  // Destaca primero lo logrado con datos concretos y plantea lo por mejorar como el paso siguiente.
+  // modo: 'estudiante' (le habla al estudiante) o 'apoderado' (habla del estudiante por su nombre).
+  function lecturaDocente(g, est, modo) {
+    const tu = modo === 'estudiante', pila = nombrePila(est.nombre);
+    const V = (a, b) => (tu ? a : b);
+    const ens = g.ensayos[g.ensayos.length - 1].ens;
+    const conCurso = Math.min(...g.ensayos.map((e) => e.A.hechas.length)) >= 5;
+    const todas = g.ensayos.flatMap((e) => e.preguntas.map((p) => ({ p, e, ok: !!e.x.aciertos[p.i], blanco: !e.x.r[p.i] })));
+    const ejes = conDatos(g.porEje).map((o) => {
+      const qs = todas.filter((t) => (t.p.eje || 'Sin dato') === o.nombre);
+      const v = o.serie.filter((z) => z != null);
+      return { ...o, curso: qs.length ? qs.reduce((s2, t) => s2 + t.p.acierto, 0) / qs.length : null, primero: v[0], ultimo: v[v.length - 1], avance: v.length >= 2 ? v[v.length - 1] - v[0] : 0 };
+    });
+    const habs = conDatos(g.porHabilidad);
+    const desc = (o) => { const th = Temarios.habilidad(ens.asignatura, o.nombre); return th ? th.descripcion : null; };
+    const temas = (o, n = 3) => {
+      const propios = [...new Set(todas.filter((t) => (t.p.eje || 'Sin dato') === o.nombre && !t.ok && t.p.contenido).map((t) => t.p.contenido))];
+      const te = Temarios.eje(ens.asignatura, o.nombre);
+      return (propios.length ? propios : te ? te.contenidos : []).slice(0, n).map(minus);
+    };
+    const de = (o) => `${o.correctas} de ${o.preguntas}`;
+    // El verbo acompaña al nivel real: no se dice "domina" con 60%
+    const verbo = (l) => (l >= 0.85 ? V('Dominas', 'Domina') : l >= 0.7 ? V('Manejas bien', 'Maneja bien') : V('Tienes un buen desempeño en', 'Tiene un buen desempeño en'));
+
+    // ---- Lo logrado: cada hallazgo tiene una versión para la lista y otra breve para el comentario ----
+    const bueno = [], cortos = [], usados = new Set();
+    const firmes = ejes.filter((o) => o.logro >= 0.6).sort((a, b) => b.logro - a.logro);
+    firmes.slice(0, 2).forEach((o, i) => {
+      usados.add(o.nombre);
+      const sobre = conCurso && o.curso != null && o.logro - o.curso >= 0.08;
+      const siempre = g.cantidad > 1 && g.fortalezas.some((f) => f.nombre === o.nombre);
+      bueno.push(`${verbo(o.logro)} ${o.nombre}: ${V('respondiste', 'respondió')} bien ${de(o)} preguntas (${pct(o.logro)})${sobre ? `, cuando el curso logró ${pct(o.curso)} en esas mismas preguntas` : ''}${siempre ? `. Además, ${V('has mantenido', 'ha mantenido')} ese nivel en todos los ensayos` : ''}.`);
+      if (i === 0) cortos.push(`${V('tu', 'su')} mejor resultado está en ${o.nombre}, con ${de(o)} respuestas correctas${sobre ? `, ${o.logro - o.curso >= 0.2 ? 'muy ' : ''}por sobre el curso` : ''}${siempre ? ' y de manera constante en todos los ensayos' : ''}`);
+      else cortos.push(o.logro >= 0.7 ? `${V('respondes', 'responde')} con seguridad en ${o.nombre} (${pct(o.logro)})` : `${V('te va', 'le va')} bien en ${o.nombre} (${pct(o.logro)})`);
+    });
+    if (!firmes.length && ejes.length) {
+      const m = ejes.slice().sort((a, b) => b.logro - a.logro)[0];
+      usados.add(m.nombre);
+      const igual = conCurso && m.curso != null && m.logro >= m.curso;
+      bueno.push(`${V('Tu', 'Su')} punto más firme es ${m.nombre}, con ${de(m)} respuestas correctas${igual ? `, igual o mejor que el curso en esas preguntas (${pct(m.curso)})` : ''}. Es un buen punto de apoyo para avanzar.`);
+      cortos.push(`${V('tu', 'su')} punto más firme es ${m.nombre}, donde ${V('lograste', 'logró')} ${de(m)} respuestas correctas`);
+    }
+    if (conCurso) {
+      const dif = todas.filter((t) => t.ok && t.p.acierto < 0.4);
+      if (dif.length) {
+        const ejesDif = [...new Set(dif.map((t) => t.p.eje).filter(Boolean))];
+        bueno.push(`${V('Resolviste', 'Resolvió')} ${dif.length === 1 ? 'una pregunta' : `${dif.length} preguntas`} que menos del 40% del curso logró responder${ejesDif.length ? ` (${lista(ejesDif.slice(0, 3))})` : ''}. Eso muestra que ${V('puedes', 'puede')} enfrentar problemas exigentes.`);
+        cortos.push(`${V('resolviste', 'resolvió')} ${dif.length === 1 ? 'una pregunta que' : `${dif.length} preguntas que`} la mayoría del curso no logró`);
+      }
+    }
+    const sube = ejes.filter((o) => o.avance >= 0.15).sort((a, b) => b.avance - a.avance)[0];
+    if (sube) {
+      bueno.push(`En ${sube.nombre} se nota ${V('tu', 'su')} avance: ${V('pasaste', 'pasó')} de ${pct(sube.primero)} a ${pct(sube.ultimo)} entre el primer y el último ensayo.`);
+      cortos.push(`en ${sube.nombre} ${V('pasaste', 'pasó')} de ${pct(sube.primero)} a ${pct(sube.ultimo)}`);
+    } else if (g.cambio != null && g.cambio >= 0.05) {
+      const e0 = g.ensayos[0].logro, e1 = g.ensayos[g.cantidad - 1].logro;
+      bueno.push(`${V('Tu', 'Su')} resultado global subió de ${pct(e0)} a ${pct(e1)} entre el primer y el último ensayo: el trabajo se está notando.`);
+      cortos.push(`${V('tu', 'su')} resultado global subió de ${pct(e0)} a ${pct(e1)}`);
+    }
+    const hb = habs.filter((o) => o.logro >= 0.65).sort((a, b) => b.logro - a.logro)[0];
+    if (hb) {
+      const d = desc(hb);
+      bueno.push(`En la habilidad de ${minus(hb.nombre)} ${V('acertaste', 'acertó')} ${de(hb)} preguntas${d ? `: ${V('sabes', 'sabe')} ${d}` : ''}.`);
+      if (d) cortos.push(`${V('muestras', 'muestra')} facilidad para ${d.split(':')[0]}`);
+    }
+    if (g.omisiones === 0) {
+      bueno.push(`${V('Respondiste', 'Respondió')} todas las preguntas, sin dejar ninguna en blanco: ${V('te atreves', 'se atreve')} a intentarlo, y eso es parte de aprender.`);
+      cortos.push(`no ${V('dejaste', 'dejó')} ninguna pregunta en blanco`);
+    }
+    if (bueno.length < 2) bueno.push(`${V('Lograste', 'Logró')} ${g.correctas} respuestas correctas de ${g.preguntas}. Cada una corresponde a un contenido que ${V('ya manejas', 'ya maneja')} y que sirve de base para lo que viene.`);
+
+    // ---- El paso siguiente: pocos focos, en tono de oportunidad ----
+    const mejorar = [];
+    let detalle = null;
+    const focos = ejes.filter((o) => o.logro < 0.6 && !usados.has(o.nombre)).sort((a, b) => a.logro - b.logro).slice(0, 2);
+    focos.forEach((o, i) => {
+      const t = temas(o);
+      mejorar.push(i === 0
+        ? `${o.nombre} es ${V('tu', 'su')} mayor oportunidad de crecer (${de(o)} correctas). ${t.length ? `Conviene afianzar ${lista(t)}` : 'Conviene reforzar sus ejercicios base'}, partiendo por ejercicios sencillos y subiendo la dificultad de a poco.`
+        : `También ${V('puedes', 'puede')} sumar puntos en ${o.nombre} (${de(o)} correctas)${t.length ? `, en especial en ${lista(t.slice(0, 2))}` : ''}.`);
+    });
+    const hd = habs.filter((o) => o.logro < 0.5).sort((a, b) => a.logro - b.logro)[0];
+    if (hd) { const d = desc(hd); mejorar.push(`La habilidad de ${minus(hd.nombre)} ${V('te', 'le')} cuesta un poco más (${de(hd)})${d ? `. Ejercitar la capacidad de ${d} ${V('te', 'le')} servirá en todas las temáticas` : ''}.`); }
+    if (conCurso) {
+      const fac = todas.filter((t) => !t.ok && !t.blanco && t.p.acierto >= 0.75);
+      if (fac.length) {
+        const uno = fac.length === 1;
+        mejorar.push(`${uno ? 'Hay una pregunta que estaba' : `Hay ${fac.length} preguntas que estaban`} a ${V('tu', 'su')} alcance y no ${uno ? 'salió' : 'salieron'} (${fac.slice(0, 5).map((t) => `N° ${t.p.n}${g.cantidad > 1 ? ` del ${etiquetaEns(t.e.ens)}` : ''}`).join(', ')}${fac.length > 5 ? ', entre otras' : ''}). ${uno ? 'Probablemente fue un descuido' : 'Probablemente fueron descuidos'}: leer con calma el enunciado y revisar antes de marcar puede hacer la diferencia.`);
+        detalle = V('cuidar los detalles: algunas preguntas que estaban a tu alcance no salieron, y leer con calma antes de marcar te sumaría puntos fácilmente', 'cuidar los detalles: algunas preguntas que estaban a su alcance no salieron, y leer con calma antes de marcar le sumaría puntos fácilmente');
+      }
+    }
+    const cansancio = g.ensayos.some((e) => {
+      const v = e.preguntas; if (v.length < 12) return false;
+      const m = Math.floor(v.length / 2), a = v.slice(0, m).filter((p) => e.x.aciertos[p.i]).length / m, b = v.slice(m).filter((p) => e.x.aciertos[p.i]).length / (v.length - m);
+      return a - b >= 0.25;
+    });
+    if (cansancio) {
+      mejorar.push(`${V('Te fue', 'Le fue')} mejor en la primera mitad de la prueba que en la segunda. Practicar con tiempo controlado ${V('te', 'le')} ayudará a mantener la concentración hasta el final.`);
+      detalle = detalle || V('mantener la concentración hasta el final de la prueba, porque en la segunda mitad bajó tu rendimiento', 'mantener la concentración hasta el final de la prueba, porque en la segunda mitad bajó su rendimiento');
+    } else if (g.omisiones / g.preguntas > 0.08) {
+      mejorar.push(`${V('Dejaste', 'Dejó')} ${g.omisiones} preguntas en blanco. Una respuesta en blanco nunca suma: vale la pena ${V('atreverte', 'atreverse')} a descartar alternativas y responder.`);
+      detalle = detalle || V('atreverte a responder todas las preguntas, porque una en blanco nunca suma', 'atreverse a responder todas las preguntas, porque una en blanco nunca suma');
+    }
+    if (!mejorar.length) mejorar.push(`No hay temáticas bajo lo esperado. El desafío ahora es ${V('ponerte', 'ponerse')} a prueba con problemas más exigentes para seguir creciendo.`);
+
+    // ---- Comentario en prosa: reconoce, orienta y alienta ----
+    const p0 = focos[0], meta = Math.min(1, g.logro + 0.07);
+    const apertura = g.logro >= 0.75 ? V(`${pila}, tu trabajo en ${g.nombre} es muy bueno y se nota.`, `${pila} tiene un desempeño muy bueno en ${g.nombre}, y es justo reconocerlo.`)
+      : g.logro >= 0.5 ? V(`${pila}, en ${g.nombre} hay logros concretos que quiero destacar.`, `${pila} muestra logros concretos en ${g.nombre} que vale la pena destacar.`)
+        : V(`${pila}, en ${g.nombre} ya hay avances sobre los cuales seguir construyendo.`, `${pila} ya tiene en ${g.nombre} avances sobre los cuales seguir construyendo.`);
+    const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+    const elegidos = cortos.slice(0, 3);
+    const frases = [apertura];
+    if (elegidos.length) frases.push(`${cap(elegidos[0])}${elegidos.length > 1 ? `. Además, ${lista(elegidos.slice(1))}` : ''}.`);
+    if (p0) {
+      const t = temas(p0, 2);
+      frases.push(V(`Para seguir avanzando, te propongo poner el foco en ${p0.nombre}${t.length ? `, sobre todo en ${lista(t)}` : ''}. Con práctica constante ahí, tu resultado puede pasar de ${pct(g.logro)} a ${pct(meta)} o más en el próximo ensayo.`,
+        `Para seguir avanzando, el foco está en ${p0.nombre}${t.length ? `, sobre todo en ${lista(t)}` : ''}. Con práctica constante, su resultado puede pasar de ${pct(g.logro)} a ${pct(meta)} o más en el próximo ensayo.`));
+      if (detalle) frases.push(V(`También te ayudará ${detalle}.`, `También le ayudará ${detalle}.`));
+    } else if (detalle) {
+      frases.push(V(`Para llegar aún más alto, solo te pediría ${detalle}.`, `Para llegar aún más alto, lo único que sugeriría es ${detalle}.`));
+    } else {
+      frases.push(V('El siguiente paso es desafiarte con preguntas más difíciles para consolidar lo que ya sabes.', 'El siguiente paso es que se desafíe con preguntas más difíciles para consolidar lo que ya sabe.'));
+    }
+    frases.push(V(g.logro >= 0.75 ? 'Sigue así.' : 'Confío en lo que puedes lograr.', 'Con el apoyo de la familia y del colegio, puede seguir progresando.'));
+    return { bueno: bueno.slice(0, 5), mejorar: mejorar.slice(0, 4), comentario: frases.join(' ') };
+  }
+
   function planMejora(g, ens) {
     const ejes = conDatos(g.porEje), habs = conDatos(g.porHabilidad);
     const fortalezas = [...ejes, ...habs.map((h) => ({ ...h, hab: true }))].filter((o) => o.logro >= 0.6).sort((a, b) => b.logro - a.logro).slice(0, 3);
@@ -1685,6 +1814,9 @@ const Informe = (() => {
         { etiqueta: 'Incorrectas', valor: String(g.incorrectas), detalle: 'respuestas marcadas' },
         { etiqueta: 'En blanco', valor: String(g.omisiones), detalle: 'sin responder' },
       ]);
+      const L = lecturaDocente(g, est, 'estudiante');
+      titulo(P, 'Comentario de tu profesor o profesora', 4, 30);
+      parrafo(P, L.comentario, { tam: 10.5 });
       if (g.cantidad > 1) parrafo(P, `El resultado global suma las respuestas correctas de los ${g.cantidad} ensayos y las divide por el total de preguntas (${g.correctas} ÷ ${g.preguntas}). No es el promedio de los porcentajes, porque los ensayos no tienen la misma cantidad de preguntas.`, { color: C.texto2, tam: 9 });
       tabla(P, [{ titulo: 'Ensayo', ancho: W - 108, envolver: true, negrita: true }, { titulo: 'Fecha', ancho: 22, negrita: false }, { titulo: 'Preguntas', ancho: 20, der: true }, { titulo: 'Correctas', ancho: 20, der: true }, { titulo: 'Blanco', ancho: 16, der: true }, { titulo: 'Logro', ancho: 30, der: true }],
         g.ensayos.map((e) => ({ celdas: [e.ens.nombre, e.ens.fecha || '', e.preguntas.length, e.correctas, e.omisiones, `${pct(e.logro)}${!ctxS.ejes && e.x.puntaje != null ? ` · ${e.x.puntaje} pts.` : ''}`] })));
@@ -1702,10 +1834,7 @@ const Informe = (() => {
       const ejes = conDatos(g.porEje), habs = conDatos(g.porHabilidad);
       if (ejes.length) { titulo(P, 'Resultado por temática', 4, ejes.length * 10 + 10); barras(P, ejes.map((o) => ({ nombre: o.nombre, valor: o.logro, color: o.logro < 0.5 ? C.critico : C.serie })), { formato: (v) => `${pct(v)}` }); }
       if (habs.length) { titulo(P, 'Resultado por habilidad', 3, habs.length * 10 + 10); barras(P, habs.map((o) => ({ nombre: o.nombre, valor: o.logro, color: o.logro < 0.5 ? C.critico : C.serie }))); }
-      const rec = [];
-      if (g.fortalezas.length) rec.push(`Fortalezas que se repiten: en ${lista(g.fortalezas.map((o) => o.nombre))} estuviste sobre 70% en todos los ensayos.`);
-      if (g.persistentes.length) rec.push(`Dificultades que se mantienen: ${lista(g.persistentes.map((o) => o.nombre))} quedó bajo 50% en todos los ensayos. Es lo primero que conviene estudiar.`);
-      if (rec.length) vinetas(P, rec, { tam: 10 });
+      if (g.persistentes.length) vinetas(P, [`${lista(g.persistentes.map((o) => o.nombre))} ${g.persistentes.length === 1 ? 'ha quedado' : 'han quedado'} bajo 50% en todos los ensayos: ${g.persistentes.length === 1 ? 'es la temática' : 'son las temáticas'} donde más rinde tu esfuerzo.`], { tam: 10 });
       // Preguntas para revisar
       const revisar = g.ensayos.map((e) => ({ e, ns: e.preguntas.filter((q) => !e.x.aciertos[q.i]).map((q) => q.n) })).filter((o) => o.ns.length);
       if (revisar.length) {
@@ -1714,11 +1843,11 @@ const Informe = (() => {
       }
       // Plan personal de mejora
       const pm = planMejora(g, ens);
-      titulo(P, 'Tu plan personal de mejora', 5, 60);
+      titulo(P, 'Tu plan personal de mejora', 5, 130);
       const hab = (o) => { const th = Temarios.habilidad(ens.asignatura, o.nombre); return th ? th.descripcion : minus(o.nombre); };
       recuadros(P, [
-        { titulo: 'Tus fortalezas', color: C.t3, fondo: '#EEF4FC', items: pm.fortalezas.length ? pm.fortalezas.map((o) => (o.hab ? `Habilidad ${minus(o.nombre)}: ${o.correctas} de ${o.preguntas} correctas. Sabes ${hab(o)}.` : `${o.nombre}: ${o.correctas} de ${o.preguntas} correctas (${pct(o.logro)}).`)) : [`Respondiste bien ${g.correctas} preguntas: esa es tu base para avanzar.`] },
-        { titulo: 'Tus prioridades', color: C.critico, fondo: '#FCF0E9', items: pm.prioridades.length ? pm.prioridades.map((o, i) => `${i + 1}. ${o.nombre}: ${o.correctas} de ${o.preguntas} correctas (${pct(o.logro)}).`) : ['Mantener el nivel y practicar con preguntas más difíciles.'] },
+        { titulo: 'Lo que haces bien', color: C.t3, fondo: '#EEF4FC', items: L.bueno },
+        { titulo: 'Tu siguiente paso', color: C.critico, fondo: '#FCF0E9', items: L.mejorar },
       ]);
       const act = [];
       if (pm.contenidos.length) act.push(`Contenidos para practicar: ${lista(pm.contenidos.map(minus))}.`);
@@ -1757,14 +1886,10 @@ const Informe = (() => {
         { etiqueta: 'Ensayos considerados', valor: String(g.cantidad), detalle: g.nombre },
         { etiqueta: 'Temáticas evaluadas', valor: String(ejes.length), detalle: lista(ejes.map((o) => o.nombre)) },
       ]);
-      const fuertes = ejes.filter((o) => o.logro >= 0.6).slice(0, 3), debiles = ejes.filter((o) => o.logro < 0.6).sort((a, b) => a.logro - b.logro).slice(0, 3);
-      const hab = (o) => { const th = Temarios.habilidad(ens.asignatura, o.nombre); return th ? th.descripcion : minus(o.nombre); };
-      const bueno = fuertes.map((o) => `Maneja bien ${o.nombre}: respondió correctamente ${o.correctas} de ${o.preguntas} preguntas.`);
-      habs.filter((o) => o.logro >= 0.7).slice(0, 2).forEach((o) => bueno.push(`Sabe ${hab(o)}.`));
-      if (!bueno.length) bueno.push(`Respondió bien ${g.correctas} preguntas. Desde ahí se construye el avance.`);
-      const mejorar = debiles.map((o) => { const te = Temarios.eje(ens.asignatura, o.nombre); return `${o.nombre} necesita más práctica (${o.correctas} de ${o.preguntas} correctas)${te ? `. Incluye temas como ${lista(te.contenidos.slice(0, 3).map(minus))}` : ''}.`; });
-      if (!mejorar.length) mejorar.push('No hay temáticas bajo lo esperado. El desafío es mantener el ritmo y practicar con problemas más exigentes.');
-      recuadros(P, [{ titulo: 'Fortalezas', color: C.t3, fondo: '#EEF4FC', items: bueno }, { titulo: 'Aspectos por fortalecer', color: C.critico, fondo: '#FCF0E9', items: mejorar }]);
+      const L = lecturaDocente(g, est, 'apoderado');
+      titulo(P, 'Comentario del docente', 4, 30);
+      parrafo(P, L.comentario, { tam: 10.5 });
+      recuadros(P, [{ titulo: 'Lo que hace bien', color: C.t3, fondo: '#EEF4FC', items: L.bueno }, { titulo: 'Su siguiente paso', color: C.critico, fondo: '#FCF0E9', items: L.mejorar }]);
       if (g.cantidad >= 2) {
         titulo(P, 'Evolución', 4, 55);
         lineas(P, [{ nombre: pila, color: C.azul, grueso: true, unir: true, valores: g.ensayos.map((e) => e.logro) }], g.ensayos.map((e) => etiquetaEns(e.ens)), { alto: 34 });
