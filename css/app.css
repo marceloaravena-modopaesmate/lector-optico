@@ -507,3 +507,8 @@ h1, h2, h3 { margin: 0; text-wrap: balance; }
 .obs-ensayo textarea { width: 100%; resize: vertical; }
 .obs-curso { display: grid; gap: 6px; margin: 10px 0; }
 .obs-curso input { width: 100%; }
+
+/* Perfiles de docente */
+.perfil-chip { display: inline-block; margin-top: 4px; border: 1px solid rgba(255,255,255,.45); background: rgba(255,255,255,.12); color: inherit; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600; }
+.docente-fila { border-top: 1px solid var(--borde); padding-top: 10px; margin-top: 10px; display: grid; gap: 8px; }
+.docente-cab { display: flex; justify-content: space-between; align-items: center; gap: 8px; }

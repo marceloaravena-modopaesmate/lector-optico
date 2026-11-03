@@ -81,10 +81,18 @@
   const config = () => Almacen.obtener('config', 'app') || {};
   async function fijarConfig(cambios) { await Almacen.guardar('config', 'app', { ...config(), ...cambios }); }
   const ensayos = () => Almacen.lista('ensayos').sort((a, b) => (b.creado || '').localeCompare(a.creado || ''));
-  const cursos = () => Almacen.lista('cursos').sort((a, b) => a.nombre.localeCompare(b.nombre));
+  // Perfiles de docente (sin contraseña): cada uno ve solo sus cursos. El perfil activo se recuerda en este equipo.
+  const CLAVE_PERFIL = 'lector-optico:perfil';
+  const docentes = () => config().docentes || [];
+  function perfilActivo() {
+    let id = null; try { id = localStorage.getItem(CLAVE_PERFIL); } catch (e) { /* sin almacenamiento */ }
+    return docentes().find((d) => d.id === id) || null;
+  }
+  const todosLosCursos = () => Almacen.lista('cursos').sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const cursos = () => { const p = perfilActivo(); return !p || p.todos ? todosLosCursos() : todosLosCursos().filter((c) => (p.cursos || []).includes(c.id)); };
   // Sin elección no hay ensayo ni curso activos: al abrir la app el docente los elige en Inicio
   function ensayoActivo() { const c = config(); return (c.ensayo && Almacen.obtener('ensayos', c.ensayo)) || null; }
-  function cursoActivo() { const c = config(); return (c.curso && Almacen.obtener('cursos', c.curso)) || null; }
+  function cursoActivo() { const c = config(); const cur = (c.curso && Almacen.obtener('cursos', c.curso)) || null; return cur && cursos().some((x) => x.id === cur.id) ? cur : null; }
   const hayDatos = () => ensayos().length > 0 && cursos().length > 0;
   // Ensayos que se están corrigiendo a la vez: el elegido en Inicio y los que se sumen
   function ensayosEnCorreccion() {
@@ -166,7 +174,11 @@
   const ultimoRespaldo = () => leerLocal(RESP.fecha);
   const guardarAlmacen = Almacen.guardar;
   Almacen.guardar = async (col, id, valor) => {
+    const nuevoCurso = col === 'cursos' && !Almacen.obtener('cursos', id);
     const r = await guardarAlmacen(col, id, valor);
+    // Un curso nuevo queda asignado al docente que lo creó
+    const p = nuevoCurso && perfilActivo();
+    if (p && !p.todos && !(p.cursos || []).includes(id)) await guardarAlmacen('config', 'app', { ...config(), docentes: docentes().map((d) => (d.id === p.id ? { ...d, cursos: [...(d.cursos || []), id] } : d)) });
     if (col !== 'config') escribirLocal(RESP.cambios, String(cambiosSinRespaldo() + 1));
     return r;
   };
@@ -287,7 +299,7 @@
     return `<div class="pantalla inicio">
       <header class="portada">
         <div class="portada-fila">
-          <div class="portada-marca">${logo}<div><span class="saludo">${saludo()}</span><span class="marca">Lector óptico</span></div></div>
+          <div class="portada-marca">${logo}<div><span class="saludo">${saludo()}</span><span class="marca">Lector óptico</span>${perfilActivo() ? `<button class="perfil-chip" data-accion="cambiar-perfil">${h(perfilActivo().nombre)} · cambiar</button>` : ''}</div></div>
           <button class="btn-redondo" data-accion="ir" data-a="ajustes" aria-label="Ajustes y respaldo">${ICONO.ajustes}</button>
         </div>
         <div class="portada-centro">
@@ -1585,6 +1597,23 @@
     } catch (e) { console.error(e); toast('No se pudo crear el informe: ' + e.message); }
   }
 
+  // Perfiles de docente: nombre, cursos asignados y si ve todo (UTP)
+  function seccionDocentes() {
+    const ds = docentes(), p = perfilActivo(), todos = todosLosCursos();
+    const chip = (accion, a, on, texto) => `<button data-accion="${accion}" data-a="${h(a)}" aria-pressed="${on}">${h(texto)}</button>`;
+    return `<section class="tarjeta pad" id="docentes"><span class="etiqueta">Docentes</span>
+      <span style="font-size:14px;color:var(--texto-2)">Crea un perfil por docente y asígnale sus cursos. Al abrir la app, cada uno elige su nombre y ve solo sus cursos. No hay contraseñas: sirve para ordenar, no para proteger datos.</span>
+      ${p ? `<span class="nota">En este equipo estás como <b>${h(p.nombre)}</b>. <button class="btn-texto" data-accion="cambiar-perfil">Cambiar</button></span>` : ''}
+      ${ds.map((d) => `<div class="docente-fila">
+        <div class="docente-cab"><b>${h(d.nombre)}</b><button class="btn-texto" style="color:var(--mal-texto)" data-accion="docente-borrar" data-a="${h(d.id)}">Quitar</button></div>
+        <div class="lista-elegir"><button class="opcion" data-accion="docente-todos" data-a="${h(d.id)}" aria-pressed="${!!d.todos}"><span class="caja">${d.todos ? ICONO.check : ''}</span><span class="principal"><b>Ve todos los cursos</b><span>Para UTP o dirección.</span></span></button></div>
+        ${d.todos ? '' : `<div class="filtros">${todos.map((c) => chip('docente-curso', `${d.id}|${c.id}`, (d.cursos || []).includes(c.id), c.nombre)).join('') || '<span class="nota">Todavía no hay cursos.</span>'}</div>`}
+      </div>`).join('')}
+      <div class="fila-guardar"><input id="a-docente" placeholder="Nombre del docente, ej.: Marcelo Aravena" aria-label="Nombre del docente"><button class="btn" data-accion="docente-agregar">Agregar</button></div>
+    </section>`;
+  }
+  const fijarDocentes = (ds) => fijarConfig({ docentes: ds });
+
   // Datos del colegio para los informes: nombre, responsable, logo y metas
   function seccionColegio() {
     const c = config().colegio || {};
@@ -1629,6 +1658,7 @@
     return `<div class="pantalla">${cabecera('Ajustes y respaldo', Almacen.modo === 'nube' ? 'Tus datos se guardan en tu cuenta de Claude' : 'Tus datos se guardan en este navegador')}
       <div class="cuerpo">
         ${seccionColegio()}
+        ${seccionDocentes()}
         <section class="tarjeta pad"><span class="etiqueta">Respaldo</span>
           <span style="font-size:14px;color:var(--texto-2)">Descarga todos tus ensayos, cursos y resultados en un archivo. Sirve para cambiar de equipo o recuperar datos. Guárdalo fuera de este equipo (Drive, OneDrive o un correo a ti mismo).</span>
           ${Almacen.modo === 'nube' ? '' : `<span class="nota">${ultimoRespaldo() ? `Último respaldo: ${new Date(ultimoRespaldo()).toLocaleDateString('es-CL')}. Cambios desde entonces: ${cambiosSinRespaldo()}.` : 'Todavía no has descargado un respaldo en este equipo.'} ${almacenamientoProtegido === true ? 'El navegador mantendrá los datos de la app aunque necesite espacio.' : almacenamientoProtegido === false ? 'El navegador podría borrar los datos si se queda sin espacio: instalar la app y respaldar seguido ayuda a evitarlo.' : ''}</span>`}
@@ -1713,11 +1743,20 @@
     informes: pInformes, ajustes: pAjustes, ficha: pFicha, colegio: pColegio,
   };
 
+  // ¿Quién eres? Aparece al abrir la app cuando hay docentes creados y este equipo aún no eligió
+  function pElegirPerfil() {
+    return `<div class="pantalla"><header class="cabecera"><div class="titulos"><h1>¿Quién eres?</h1><span class="sub">Elige tu nombre para ver tus cursos</span></div></header>
+      <div class="cuerpo"><section class="tarjeta pad"><div class="lista-elegir">
+        ${docentes().map((d) => `<button class="opcion" data-accion="elegir-perfil" data-a="${h(d.id)}"><span class="principal"><b>${h(d.nombre)}</b><span>${d.todos ? 'Ve todos los cursos del colegio' : `${(d.cursos || []).length} curso${(d.cursos || []).length === 1 ? '' : 's'}: ${h(todosLosCursos().filter((c) => (d.cursos || []).includes(c.id)).map((c) => c.nombre).join(', ') || 'todavía sin cursos')}`}</span></span></button>`).join('')}
+      </div><span class="nota">La app recordará tu elección en este equipo. Puedes cambiarla desde Inicio o Ajustes. Los perfiles se crean en Ajustes › Docentes.</span></section></div></div>`;
+  }
+
   function render() {
     const y = window.scrollY;
     ocultarTipSeguro();
     Estad.configurar(config());
-    raiz.innerHTML = '<div class="app">' + (PANTALLAS[E.pantalla] || pInicio)() + '</div>' + capas();
+    const pantalla = docentes().length && !perfilActivo() ? pElegirPerfil : (PANTALLAS[E.pantalla] || pInicio);
+    raiz.innerHTML = '<div class="app">' + pantalla() + '</div>' + capas();
     if (E.pantalla === 'revision' && E.hojaPregunta != null) dibujarRecorte();
     if (E.pantalla === 'camara' && E.camara.stream) conectarVideo();
     window.scrollTo(0, E.mantenerScroll ? y : 0);
@@ -2340,6 +2379,29 @@
     'inf-curso-doc': (a) => { const S = estadoInformes(); S.cursoDoc = a; S.est = null; S.ensayosEst = null; E.mantenerScroll = true; render(); },
     'inf-dest': (a) => { const S = estadoInformes(); S.dest = a; if (a === 'directivo') S.tipoDir = S.tipoDir || 'A'; if (a === 'docente') S.tipoDoc = S.tipoDoc || 'A'; S.ensayosEst = null; E.mantenerScroll = true; render(); },
     'inf-tipo': (a) => { const S = estadoInformes(); if (S.dest === 'directivo') S.tipoDir = a; else S.tipoDoc = a; if (a === 'B') S.cursos = datosInformes().delNivel.map((c) => c.id); E.mantenerScroll = true; render(); },
+    'elegir-perfil': (a) => { try { localStorage.setItem(CLAVE_PERFIL, a); } catch (e) { /* nada */ } E.inf = null; E.pantalla = 'inicio'; render(); },
+    'cambiar-perfil': () => { try { localStorage.removeItem(CLAVE_PERFIL); } catch (e) { /* nada */ } E.inf = null; render(); },
+    'docente-agregar': async () => {
+      const el = document.getElementById('a-docente'), nombre = el && el.value.trim();
+      if (!nombre) { toast('Escribe el nombre del docente'); return; }
+      const id = 'doc-' + Almacen.id(nombre).slice(0, 24) + '-' + Date.now().toString(36).slice(-4);
+      const primero = !docentes().length;
+      await fijarDocentes([...docentes(), { id, nombre, cursos: [], todos: primero }]);
+      if (primero) { try { localStorage.setItem(CLAVE_PERFIL, id); } catch (e) { /* nada */ } toast(`${nombre} creado. Como es el primero, ve todos los cursos.`); }
+      else toast(`${nombre} creado. Ahora márcale sus cursos.`);
+      E.mantenerScroll = true; render();
+    },
+    'docente-borrar': async (a) => {
+      const d = docentes().find((x) => x.id === a); if (!d) return;
+      if (!confirm(`¿Quitar el perfil de ${d.nombre}? Sus cursos y resultados no se borran.`)) return;
+      await fijarDocentes(docentes().filter((x) => x.id !== a)); E.mantenerScroll = true; render();
+    },
+    'docente-todos': async (a) => { await fijarDocentes(docentes().map((d) => (d.id === a ? { ...d, todos: !d.todos } : d))); E.mantenerScroll = true; render(); },
+    'docente-curso': async (a) => {
+      const [idD, idC] = a.split('|');
+      await fijarDocentes(docentes().map((d) => (d.id === idD ? { ...d, cursos: (d.cursos || []).includes(idC) ? d.cursos.filter((x) => x !== idC) : [...(d.cursos || []), idC] } : d)));
+      E.mantenerScroll = true; render();
+    },
     'obs-irregular': async (a) => {
       const [idE, idC] = a.split('|');
       await guardarObs(idE, (o) => { const x = o.cursos[idC] || {}; o.cursos[idC] = { ...x, irregular: !x.irregular }; });
