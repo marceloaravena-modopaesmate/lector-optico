@@ -1406,9 +1406,9 @@ const Informe = (() => {
 
   // ---------- 1. Resumen para equipo directivo ----------
   // ctxD: { ens, nivel, porCurso: [{ curso, A }], inst: análisis conjunto, colegio, validacion }
-  function seccionDirectivo(P, ctxD) {
+  function seccionDirectivo(P, ctxD, { sinNota = false, numero = '' } = {}) {
     const { ens, porCurso, inst } = ctxD, R = inst.resumen;
-    banda(P, 'Resumen para equipo directivo', `${ens.nombre} · ${ctxD.nivel || 'Cursos seleccionados'}`, [tipoEvaluacion(ens), ens.fecha, `generado el ${hoy()}`].filter(Boolean).join(' · '));
+    banda(P, numero ? `${numero} ${ens.nombre}` : 'Resumen para equipo directivo', numero ? `Detalle de ${ctxD.nivel || 'los cursos seleccionados'}` : `${ens.nombre} · ${ctxD.nivel || 'Cursos seleccionados'}`, [tipoEvaluacion(ens), ens.fecha, `generado el ${hoy()}`].filter(Boolean).join(' · '));
     titulo(P, 'Información general', 0, 50);
     ficha(P, [
       ['Establecimiento', (ctxD.colegio || {}).nombre || 'Sin nombre (se define en Ajustes)'],
@@ -1477,7 +1477,108 @@ const Informe = (() => {
     if (porCurso.some((x) => x.A.resumen.participacion < u.participacion)) rec.push('Asegurar la participación en el próximo ensayo: con muchas ausencias los resultados pueden no representar al curso.');
     rec.push('Repetir la medición con un ensayo equivalente en 6 a 8 semanas para verificar si las acciones tuvieron efecto, comparando los mismos ejes.');
     vinetas(P, rec, { tam: 10 });
-    notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!inst.estandares });
+    if (!sinNota) notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!inst.estandares });
+  }
+
+  // Resumen institucional de varios ensayos de un mismo tipo y todos los cursos que los rindieron.
+  // bloques: un contexto directivo por cada ensayo y nivel (el mismo de seccionDirectivo).
+  function seccionDirectivoConsolidado(P, M2) {
+    const { tipo, ensayos: ens, bloques } = M2, u = Estad.conf.institucional;
+    const cursos = [...new Map(bloques.flatMap((b) => b.porCurso.map((x) => [x.curso.id, x.curso]))).values()];
+    const nivelDe = new Map(bloques.flatMap((b) => b.porCurso.map((x) => [x.curso.id, b.nivel || '–'])));
+    cursos.sort((a, b) => (nivelDe.get(a.id) || '').localeCompare(nivelDe.get(b.id) || '') || a.nombre.localeCompare(b.nombre));
+    const celda = (e, c) => { for (const b of bloques) if (b.ens.id === e.id) { const x = b.porCurso.find((y) => y.curso.id === c.id); if (x) return x.A; } return null; };
+    // Total por ensayo: ponderado por estudiantes evaluados
+    const total = (e) => {
+      const bs = bloques.filter((b) => b.ens.id === e.id);
+      const ev = bs.reduce((s2, b) => s2 + b.inst.resumen.corregidas, 0), lst = bs.reduce((s2, b) => s2 + b.inst.resumen.total, 0);
+      return { media: ev ? bs.reduce((s2, b) => s2 + b.inst.resumen.media * b.inst.resumen.corregidas, 0) / ev : null, evaluados: ev, total: lst, cursos: bs.reduce((s2, b) => s2 + b.porCurso.length, 0) };
+    };
+    const T = ens.map(total);
+    const evaluadosTot = T.reduce((s2, t) => s2 + t.evaluados, 0);
+    const fechas = ens.map((e) => e.fecha).filter(Boolean);
+    banda(P, 'Resumen para equipo directivo', `${tipo} · ${plural(ens.length, 'ensayo', 'ensayos')} · ${plural(cursos.length, 'curso', 'cursos')}`, [fechas.length ? `${fechas[0]}${fechas.length > 1 ? ` al ${fechas[fechas.length - 1]}` : ''}` : '', `generado el ${hoy()}`].filter(Boolean).join(' · '));
+    titulo(P, 'Información general', 0, 50);
+    const niveles = [...new Set(cursos.map((c) => nivelDe.get(c.id)))];
+    ficha(P, [
+      ['Establecimiento', (M2.colegio || {}).nombre || 'Sin nombre (se define en Ajustes)'],
+      ['Tipo de evaluación', tipo],
+      ['Ensayos incluidos', ens.map((e) => `${e.nombre}${e.fecha ? ` (${e.fecha})` : ''}`).join('; ')],
+      ['Niveles', lista(niveles)],
+      ['Cursos que rindieron', `${cursos.length}: ${lista(cursos.map((c) => c.nombre))}`],
+      ['Hojas corregidas', `${evaluadosTot} en total`],
+    ]);
+    const errores = [...new Set(bloques.flatMap((b) => (b.validacion ? b.validacion.errores : [])))];
+    if (errores.length) { avisoDatos(P, { errores, avisos: [] }); }
+
+    // 1. Tabla cursos x ensayos
+    seccion(P, 1, 'Resultados por curso y ensayo', 60);
+    const maxCols = 6, mostrados = ens.slice(-maxCols);
+    if (ens.length > maxCols) parrafo(P, `La tabla muestra los ${maxCols} ensayos más recientes; el promedio considera todos.`, { color: C.texto2, tam: 9 });
+    const anchoE = Math.min(22, (W - 62) / (mostrados.length + 1));
+    const promCurso = (c) => { const v = ens.map((e) => celda(e, c)).filter(Boolean); return v.length ? v.reduce((s2, A) => s2 + A.resumen.media, 0) / v.length : null; };
+    tabla(P, [{ titulo: 'Curso', ancho: W - 32 - anchoE * (mostrados.length + 1), negrita: true, envolver: true }, { titulo: 'Nivel', ancho: 32, negrita: false, envolver: true },
+      ...mostrados.map((e, i) => ({ titulo: `E${ens.length - mostrados.length + i + 1}`, ancho: anchoE, der: true, negrita: false })), { titulo: 'Prom.', ancho: anchoE, der: true, negrita: true }],
+    [...cursos.map((c) => {
+      const pc = promCurso(c), g = T.reduce((s2, t) => s2 + (t.media || 0) * t.evaluados, 0) / (evaluadosTot || 1);
+      return { resaltar: pc != null && g - pc >= u.brechaCurso, celdas: [c.nombre, nivelDe.get(c.id), ...mostrados.map((e) => { const A = celda(e, c); return A ? pct(A.resumen.media) : '–'; }), pc == null ? '–' : pct(pc)] };
+    }), { celdas: ['Total', '', ...mostrados.map((e) => { const t = T[ens.indexOf(e)]; return t.media == null ? '–' : pct(t.media); }), pct(T.reduce((s2, t) => s2 + (t.media || 0) * t.evaluados, 0) / (evaluadosTot || 1))] }]);
+    vinetas(P, mostrados.map((e, i) => `E${ens.length - mostrados.length + i + 1}: ${e.nombre}${e.fecha ? ` (${e.fecha})` : ''}`), { tam: 8.5 });
+    parrafo(P, `Logro promedio de cada curso. Total: promedio de todos los estudiantes evaluados. En color, los cursos ${Math.round(u.brechaCurso * 100)} pp o más bajo el total.`, { color: C.texto2, tam: 8.5 });
+
+    // 2. Participación por ensayo
+    titulo(P, 'Participación por ensayo', 5, 40);
+    tabla(P, [{ titulo: 'Ensayo', ancho: W - 98, envolver: true, negrita: true }, { titulo: 'Cursos', ancho: 18, der: true }, { titulo: 'Evaluados', ancho: 24, der: true }, { titulo: 'Particip.', ancho: 26, der: true }, { titulo: 'Logro', ancho: 30, der: true }],
+      ens.map((e, i) => ({ resaltar: T[i].total && T[i].evaluados / T[i].total < u.participacion, celdas: [e.nombre, T[i].cursos, `${T[i].evaluados} de ${T[i].total}`, T[i].total ? pct(T[i].evaluados / T[i].total) : '–', T[i].media == null ? '–' : pct(T[i].media)] })));
+
+    // 3. Evolución
+    let ns = 2;
+    if (ens.length >= 2) {
+      seccion(P, ns++, 'Evolución', 70);
+      const series = niveles.map((nv, k) => ({ nombre: nv, color: C.cat[(k + 1) % C.cat.length], unir: true, valores: ens.map((e) => {
+        const b = bloques.find((x) => x.ens.id === e.id && (x.nivel || '–') === nv); return b ? b.inst.resumen.media : null; }) }));
+      lineas(P, [{ nombre: 'Total', color: C.azul, grueso: true, unir: true, valores: T.map((t) => t.media) }, ...(niveles.length > 1 ? series : [])], ens.map((e, i) => `E${i + 1}`), { alto: 42 });
+      const a = T[0].media, z = T[T.length - 1].media;
+      if (a != null && z != null) parrafo(P, `${Math.abs(z - a) < 0.03 ? `El logro total se mantuvo estable entre el primer y el último ensayo (${pct(a)} y ${pct(z)}).` : `El logro total ${z > a ? 'subió' : 'bajó'} de ${pct(a)} a ${pct(z)} entre el primer y el último ensayo.`} Los ensayos no tienen necesariamente la misma dificultad: la tendencia es más confiable que una diferencia aislada.`, { tam: 10 });
+      const cambios = cursos.map((c) => { const v = ens.map((e) => celda(e, c)).filter(Boolean); return v.length >= 2 ? { c, d: v[v.length - 1].resumen.media - v[0].resumen.media } : null; }).filter(Boolean);
+      const suben = cambios.filter((x) => x.d >= 0.05).sort((p1, p2) => p2.d - p1.d), bajan = cambios.filter((x) => x.d <= -0.05).sort((p1, p2) => p1.d - p2.d);
+      const tx = [];
+      if (suben.length) tx.push(`Mejoran: ${lista(suben.slice(0, 5).map((x) => `${x.c.nombre} (+${Math.round(x.d * 100)} pp)`))}.`);
+      if (bajan.length) tx.push(`Bajan: ${lista(bajan.slice(0, 5).map((x) => `${x.c.nombre} (${Math.round(x.d * 100)} pp)`))}.`);
+      if (tx.length) vinetas(P, tx, { tam: 10 });
+    }
+
+    // 4. Ejes considerando todos los ensayos
+    const ejes = new Map();
+    bloques.forEach((b) => conDatos(b.inst.porEje).forEach((g) => {
+      const w = g.preguntas * b.inst.resumen.corregidas, o = ejes.get(g.nombre) || { nombre: g.nombre, suma: 0, peso: 0 };
+      o.suma += g.logro * w; o.peso += w; ejes.set(g.nombre, o);
+    }));
+    const ej = [...ejes.values()].filter((o) => o.peso).map((o) => ({ nombre: o.nombre, logro: o.suma / o.peso })).sort((a, b) => b.logro - a.logro);
+    if (ej.length) {
+      seccion(P, ns++, 'Ejes temáticos en todos los ensayos', ej.length * 11 + 20);
+      barras(P, ej.map((g) => ({ nombre: g.nombre, valor: g.logro, color: g.logro < u.ejeBajo ? C.critico : C.serie })));
+    }
+
+    // 5. Alertas y prioridades
+    seccion(P, ns++, 'Alertas y prioridades', 50);
+    const al = [];
+    const gTot = T.reduce((s2, t) => s2 + (t.media || 0) * t.evaluados, 0) / (evaluadosTot || 1);
+    cursos.forEach((c) => {
+      const v = ens.map((e) => { const A = celda(e, c), t = T[ens.indexOf(e)]; return A && t.media != null ? A.resumen.media - t.media : null; }).filter((d) => d != null);
+      const bajo = v.filter((d) => d <= -u.brechaCurso).length;
+      if (v.length && bajo >= Math.ceil(v.length / 2)) al.push(`${c.nombre} queda ${Math.round(u.brechaCurso * 100)} pp o más bajo el total en ${bajo} de ${plural(v.length, 'ensayo', 'ensayos')}: conviene acompañar al curso y revisar su cobertura curricular.`);
+    });
+    ej.filter((g) => g.logro < u.ejeBajo).forEach((g) => al.push(`${g.nombre} tiene ${pct(g.logro)} de logro considerando todos los ensayos: es una prioridad a nivel de departamento.`));
+    ens.forEach((e, i) => { if (T[i].total && T[i].evaluados / T[i].total < u.participacion) al.push(`Participación baja en ${e.nombre} (${pct(T[i].evaluados / T[i].total)}): los resultados pueden no representar a todos los cursos.`); });
+    vinetas(P, al.length ? al : ['No se activó ninguna alerta con los criterios actuales.'], { tam: 10 });
+    const rec = [];
+    const peor = ej[ej.length - 1];
+    if (peor && peor.logro < 0.6) rec.push(`Prioridad institucional: ${peor.nombre}. Coordinar una unidad de refuerzo común en los niveles que rinden ${tipo}.`);
+    rec.push(`Logro promedio considerando todos los ensayos: ${pct1(gTot)}, con ${evaluadosTot} hojas corregidas.`);
+    rec.push('El detalle de cada ensayo, con sus indicadores, comparación entre cursos y alertas, sigue en las páginas siguientes.');
+    titulo(P, 'Síntesis', 4, 30);
+    vinetas(P, rec, { tam: 10 });
   }
 
   // ---------- Docente: secciones adicionales ----------
@@ -1918,6 +2019,15 @@ const Informe = (() => {
     const P = docCon(ctxD, pieDe(ctxD, 'Resumen para equipo directivo', `${ctxD.ens.nombre}`));
     seccionDirectivo(P, ctxD); piePaginas(P); return P.doc.output('blob');
   }
+  // Varios ensayos y cursos: resumen consolidado y luego el detalle de cada ensayo por nivel
+  function directivoConsolidado(M2) {
+    const P = docCon({ colegio: M2.colegio, ens: M2.ensayos[0] }, pieDe(M2, 'Resumen para equipo directivo', M2.tipo));
+    seccionDirectivoConsolidado(P, M2);
+    M2.bloques.forEach((b, i) => { nuevaPagina(P); seccionDirectivo(P, b, { sinNota: true, numero: `Detalle ${i + 1}:` }); });
+    nuevaPagina(P);
+    notaMetodologica(P, { tieneTabla: M2.ensayos.some((e) => Estad.tieneTabla(e)), tieneCortes: M2.bloques.some((b) => !!b.inst.estandares) });
+    piePaginas(P); return P.doc.output('blob');
+  }
   function docente(ctx, { fichas = true } = {}) {
     const P = docCon(ctx, pieDe(ctx, 'Informe para el docente', `${ctx.ens.nombre} · ${ctx.cur.nombre}`));
     cuerpoCurso(P, ctx);
@@ -1947,5 +2057,5 @@ const Informe = (() => {
     return { indicadores: ctxD.inst.resumen, alertas: alertasInstitucionales(ctxD.porCurso, ctxD.inst) };
   }
 
-  return { curso, estudiantes, estudiante, directivo, docente, acumulado, completo, vistaPrevia };
+  return { curso, estudiantes, estudiante, directivo, directivoConsolidado, docente, acumulado, completo, vistaPrevia };
 })();

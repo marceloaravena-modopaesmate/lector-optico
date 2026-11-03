@@ -1241,6 +1241,23 @@
   function ensayosEst(cur, idEst, S) {
     return ensayos().filter((e) => hojasDe(e, cur)[idEst] && enRango(e, S)).sort((a, b) => Estad.fechaOrden(a).localeCompare(Estad.fechaOrden(b)));
   }
+  // Directivo: ensayos del tipo elegido (todos por defecto) y todos los cursos que los rindieron
+  function seleccionDirectiva(S, delGrupo) {
+    const ensSel = (S.ensDir ? delGrupo.filter((e) => S.ensDir.includes(e.id)) : delGrupo).slice().sort((a, b) => Estad.fechaOrden(a).localeCompare(Estad.fechaOrden(b)));
+    const disponibles = cursos().filter((c) => ensSel.some((e) => conHojasEn(e, c))).sort((a, b) => nombreNivel(a).localeCompare(nombreNivel(b)) || a.nombre.localeCompare(b.nombre));
+    const cursosSel = S.cursosDir ? disponibles.filter((c) => S.cursosDir.includes(c.id)) : disponibles;
+    return { ensSel, disponibles, cursosSel };
+  }
+  function contextoDirectivoVarios(S, delGrupo) {
+    const { ensSel, cursosSel } = seleccionDirectiva(S, delGrupo);
+    const bloques = [];
+    ensSel.forEach((e) => {
+      const niveles = new Map();
+      cursosSel.filter((c) => conHojasEn(e, c)).forEach((c) => { const nv = nombreNivel(c); if (!niveles.has(nv)) niveles.set(nv, []); niveles.get(nv).push(c); });
+      for (const [nv, cs] of niveles) bloques.push(contextoDirectivo(e, cs, nv));
+    });
+    return { tipo: S.asig, ensayos: ensSel, bloques: bloques.filter((b) => b.porCurso.length), colegio: config().colegio || {} };
+  }
   function contextoDirectivo(ens, cursosSel, nivel) {
     const porCurso = cursosSel.map((c, idx) => ({ curso: c, idx, A: Estad.analizar(ens, c, hojasDe(ens, c)) })).filter((x) => x.A.hechas.length);
     const N = Estad.nivel(ens, porCurso.map((x) => x.curso), (c) => hojasDe(ens, c), nivel || 'Cursos seleccionados');
@@ -1307,7 +1324,14 @@
             ${C2.map((g) => `<tr><td class="ajusta">${h(g.nombre)}</td><td class="num">${g.cantidad}</td><td class="num">${g.correctas}/${g.preguntas}</td><td class="num">${pct(g.logro)}</td></tr>`).join('') || '<tr><td colspan="4">Sin datos para esa selección</td></tr>'}</tbody></table></div>`;
         } else previa += `<span class="nota">Se generará un informe por cada uno de los ${conEst.length} estudiantes con los ensayos marcados.</span>`;
       }
-      if (!individual || S.dest === 'completo') {
+      if (S.dest === 'directivo') {
+        const M2 = contextoDirectivoVarios(S, delGrupo);
+        const ev = M2.bloques.reduce((a, b) => a + b.inst.resumen.corregidas, 0), media = ev ? M2.bloques.reduce((a, b) => a + b.inst.resumen.media * b.inst.resumen.corregidas, 0) / ev : 0;
+        const ncur = new Set(M2.bloques.flatMap((b) => b.porCurso.map((x) => x.curso.id))).size;
+        previa += `<div class="cifras cuatro"><div class="tarjeta"><span>Ensayos</span><b class="num">${M2.ensayos.length}</b></div><div class="tarjeta"><span>Cursos</span><b class="num">${ncur}</b></div>
+          <div class="tarjeta"><span>Hojas corregidas</span><b class="num">${ev}</b></div><div class="tarjeta"><span>Logro promedio</span><b class="num">${pct(media)}</b></div></div>
+          <span class="nota">${M2.bloques.length > 1 ? `El PDF parte con un resumen de todos los cursos y ensayos (tabla curso por ensayo, participación, evolución, ejes y alertas) y sigue con el detalle de cada ensayo por nivel (${M2.bloques.length} secciones).` : 'Un solo ensayo y un nivel: se genera el informe directivo de ese ensayo.'}</span>`;
+      } else if (!individual || S.dest === 'completo') {
         const D = contextoDirectivo(ens, cursosSel, S.nivel), R = D.inst.resumen, al = Informe.vistaPrevia(D).alertas;
         previa += `<div class="cifras cuatro"><div class="tarjeta"><span>Evaluados</span><b class="num">${R.corregidas}<span style="font-size:14px">/${R.total}</span></b></div>
           <div class="tarjeta"><span>Participación</span><b class="num">${pct(R.participacion)}</b></div><div class="tarjeta"><span>Logro promedio</span><b class="num">${pct(R.media)}</b></div>
@@ -1321,8 +1345,16 @@
       ${guardadas.length ? `<section class="tarjeta pad"><span class="etiqueta">Configuraciones guardadas</span><div class="filtros">${guardadas.map((g, i) => `<button data-accion="inf-cargar" data-a="${i}">${h(g.nombre)}</button>`).join('')}</div>
         <button class="btn-texto" data-accion="inf-borrar-guardadas">Borrar las configuraciones guardadas</button></section>` : ''}
       ${paso(1, 'Tipo de evaluación', `<div class="filtros">${asigs.map((a) => chip('inf-asig', a, a === S.asig, a)).join('')}</div>`)}
-      ${paso(2, 'Ensayo', `<div class="lista-elegir">${delGrupo.map((e) => opcion('inf-ens', e.id, e.id === S.ens, e.nombre, [e.fecha, `${cursos().filter((c) => conHojasEn(e, c)).length} cursos con hojas`].filter(Boolean).join(' · '))).join('')}</div>`)}
-      ${paso(3, 'Nivel y cursos', `${(() => { const nvs = [...new Set(cursos().filter((c) => conHojasEn(ens, c)).map((c) => nombreNivel(c)))]; return nvs.length > 1 ? `<div class="filtros">${nvs.map((n) => chip('inf-nivel', n, n === S.nivel, n)).join('')}</div>` : ''; })()}
+      ${S.dest === 'directivo' ? (() => {
+        const D2 = seleccionDirectiva(S, delGrupo);
+        return paso(2, 'Ensayos', `<span class="nota">Marca los ensayos de ${h(S.asig)} que quieres incluir. Por defecto van todos.</span>
+          <div class="filtros"><button data-accion="inf-dir-ens-todos" data-a="todos">Todos</button><button data-accion="inf-dir-ens-todos" data-a="ultimo">Solo el más reciente</button></div>
+          <div class="lista-elegir">${delGrupo.map((e) => opcion('inf-dir-ens', e.id, D2.ensSel.some((x) => x.id === e.id), e.nombre, [e.fecha, `${cursos().filter((c) => conHojasEn(e, c)).length} cursos con hojas`].filter(Boolean).join(' · '))).join('')}</div>`)
+          + paso(3, 'Cursos', `<span class="nota">Todos los cursos que rindieron los ensayos marcados${[...new Set(D2.disponibles.map((c) => nombreNivel(c)))].length > 1 ? ', de todos los niveles' : ''}. Quita los que no quieras incluir.</span>
+          <div class="filtros">${D2.disponibles.map((c) => chip('inf-dir-curso', c.id, D2.cursosSel.some((x) => x.id === c.id), c.nombre)).join('')}</div>`);
+      })() : ''}
+      ${S.dest === 'directivo' ? '' : paso(2, 'Ensayo', `<div class="lista-elegir">${delGrupo.map((e) => opcion('inf-ens', e.id, e.id === S.ens, e.nombre, [e.fecha, `${cursos().filter((c) => conHojasEn(e, c)).length} cursos con hojas`].filter(Boolean).join(' · '))).join('')}</div>`)}
+      ${S.dest === 'directivo' ? '' : paso(3, 'Nivel y cursos', `${(() => { const nvs = [...new Set(cursos().filter((c) => conHojasEn(ens, c)).map((c) => nombreNivel(c)))]; return nvs.length > 1 ? `<div class="filtros">${nvs.map((n) => chip('inf-nivel', n, n === S.nivel, n)).join('')}</div>` : ''; })()}
         <span class="nota">Marca los cursos que quieres comparar.</span>
         <div class="filtros">${delNivel.map((c) => chip('inf-curso', c.id, S.cursos.includes(c.id), c.nombre)).join('')}</div>
         ${S.cursos.length > 1 && S.dest !== 'directivo' ? `<span class="etiqueta">Curso del informe docente e individual</span><div class="filtros">${S.cursos.map((id) => chip('inf-curso-doc', id, id === S.cursoDoc, (Almacen.obtener('cursos', id) || {}).nombre || id)).join('')}</div>` : ''}`)}
@@ -1349,8 +1381,10 @@
       };
       let blob, archivo;
       if (S.dest === 'directivo') {
-        blob = Informe.directivo(contextoDirectivo(ens, cursosSel, S.nivel));
-        archivo = `informe_directivo_${nombre(S.nivel || 'cursos')}_${nombre(ens.nombre)}.pdf`;
+        const M2 = contextoDirectivoVarios(S, datosInformes().delGrupo);
+        if (!M2.bloques.length) { toast('No hay hojas corregidas para esa selección.'); return; }
+        if (M2.bloques.length === 1) { blob = Informe.directivo(M2.bloques[0]); archivo = `informe_directivo_${nombre(M2.bloques[0].nivel || 'cursos')}_${nombre(M2.bloques[0].ens.nombre)}.pdf`; }
+        else { blob = Informe.directivoConsolidado(M2); archivo = `informe_directivo_${nombre(S.asig || 'ensayos')}_${M2.ensayos.length}_ensayos.pdf`; }
       } else if (S.dest === 'docente') {
         blob = Informe.docente(contextoDocente(ens, curDoc, cursosSel), { fichas: S.fichas });
         archivo = `informe_docente_${nombre(curDoc.nombre)}_${nombre(ens.nombre)}.pdf`;
@@ -1941,8 +1975,22 @@
     'informe-perfil': () => descargarInformeEstudiante(),
     'enviar-perfil': () => enviarInformeEstudiante(),
     'guardar-contacto': (a) => guardarContacto(a),
-    'inf-asig': (a) => { const S = estadoInformes(); S.asig = a; S.ens = null; S.ensayosEst = null; E.mantenerScroll = true; render(); },
+    'inf-asig': (a) => { const S = estadoInformes(); S.asig = a; S.ens = null; S.ensayosEst = null; S.ensDir = null; S.cursosDir = null; E.mantenerScroll = true; render(); },
     'inf-ens': (a) => { estadoInformes().ens = a; E.mantenerScroll = true; render(); },
+    'inf-dir-ens': (a) => {
+      const S = estadoInformes(), { delGrupo } = datosInformes(), act = seleccionDirectiva(S, delGrupo).ensSel.map((e) => e.id);
+      const nuevo = act.includes(a) ? act.filter((x) => x !== a) : [...act, a];
+      S.ensDir = nuevo.length ? nuevo : [a]; E.mantenerScroll = true; render();
+    },
+    'inf-dir-ens-todos': (a) => {
+      const S = estadoInformes(), { delGrupo } = datosInformes();
+      S.ensDir = a === 'todos' ? null : [delGrupo[0].id]; S.cursosDir = null; E.mantenerScroll = true; render();
+    },
+    'inf-dir-curso': (a) => {
+      const S = estadoInformes(), { delGrupo } = datosInformes(), act = seleccionDirectiva(S, delGrupo).cursosSel.map((c) => c.id);
+      const nuevo = act.includes(a) ? act.filter((x) => x !== a) : [...act, a];
+      S.cursosDir = nuevo.length ? nuevo : [a]; E.mantenerScroll = true; render();
+    },
     'inf-nivel': (a) => { const S = estadoInformes(); S.nivel = a; S.cursos = []; E.mantenerScroll = true; render(); },
     'inf-curso': (a) => { const S = estadoInformes(); S.cursos = S.cursos.includes(a) ? S.cursos.filter((x) => x !== a) : [...S.cursos, a]; if (!S.cursos.length) S.cursos = [a]; E.mantenerScroll = true; render(); },
     'inf-curso-doc': (a) => { const S = estadoInformes(); S.cursoDoc = a; S.est = null; S.ensayosEst = null; E.mantenerScroll = true; render(); },
