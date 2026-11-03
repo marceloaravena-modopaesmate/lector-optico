@@ -86,16 +86,19 @@ const Excel = (() => {
     };
   }
 
-  // plantilla_lista_curso.xlsx -> [{lista, nombre, rut, curso}]
+  // plantilla_lista_curso.xlsx -> [{lista, nombre, rut, curso, correo, correoApoderado}]
   async function leerLista(archivo) {
     const libro = await libroDesdeArchivo(archivo);
     const estudiantes = [];
+    let invalidos = 0;
     filas(hoja(libro, ['Lista'], 0)).slice(1).forEach((f, i) => {
       const nombre = texto(f[1]);
       if (!nombre) return;
-      estudiantes.push({ lista: parseInt(f[0], 10) || i + 1, nombre, rut: texto(f[2]), curso: texto(f[3]) });
+      const correo = (v) => { const t = texto(v).replace(/^mailto:/i, '').trim(); if (t && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) { invalidos++; return ''; } return t; };
+      estudiantes.push({ lista: parseInt(f[0], 10) || i + 1, nombre, rut: texto(f[2]), curso: texto(f[3]), correo: correo(f[4]), correoApoderado: correo(f[5]) });
     });
     if (!estudiantes.length) throw new Error('No encontré estudiantes: la columna B debe tener los nombres.');
+    estudiantes.correosInvalidos = invalidos;
     return estudiantes;
   }
 

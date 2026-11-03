@@ -895,8 +895,30 @@
           ${falladas.map((p) => `<tr><td class="num">${p.n}${p.piloto ? '<small> (piloto)</small>' : ''}</td><td>${P.r[p.i] || '–'}</td><td>${p.clave}</td><td class="ajusta">${h(p.eje)}</td><td class="num">${pct(p.acierto)}</td></tr>`).join('')}</tbody></table></div>
         </section>
         <button class="btn" data-accion="ver-hoja" data-a="${h(P.e.id)}">Ver o corregir su hoja</button>
+        ${seccionContacto(P.e)}
         ${seccionInformeEstudiante(P.e, cur)}
       </div></div>`;
+  }
+
+  const correoValido = (t) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t);
+  // En el perfil: correos del estudiante y del apoderado, editables
+  function seccionContacto(est) {
+    return `<section class="tarjeta pad contacto"><span class="etiqueta">Correos</span>
+      <label class="campo" for="correo-est">Correo del estudiante<input type="email" id="correo-est" inputmode="email" autocomplete="off" placeholder="nombre@correo.cl" value="${h(est.correo || '')}"></label>
+      <label class="campo" for="correo-apo">Correo del apoderado<input type="email" id="correo-apo" inputmode="email" autocomplete="off" placeholder="apoderado@correo.cl" value="${h(est.correoApoderado || '')}"></label>
+      <button class="btn" data-accion="guardar-contacto" data-a="${h(est.id)}">Guardar correos</button>
+      <span class="nota">También puedes cargarlos en la lista del curso (columnas E y F de la plantilla).</span>
+    </section>`;
+  }
+  async function guardarContacto(idEst) {
+    const cur = cursoActivo(), est = cur && cur.estudiantes.find((e) => e.id === idEst);
+    if (!est) return;
+    const ce = document.getElementById('correo-est').value.trim(), ca = document.getElementById('correo-apo').value.trim();
+    if ((ce && !correoValido(ce)) || (ca && !correoValido(ca))) { toast('Revisa el correo: debe tener la forma nombre@dominio.cl'); return; }
+    if (ce) est.correo = ce; else delete est.correo;
+    if (ca) est.correoApoderado = ca; else delete est.correoApoderado;
+    await Almacen.guardar('cursos', cur.id, cur);
+    toast('Correos guardados'); E.mantenerScroll = true; render();
   }
 
   // Ensayos que rindió un estudiante en el curso activo, del más reciente al más antiguo
@@ -924,28 +946,61 @@
       <div class="segmento tres"><button data-accion="modo-perfil" data-a="estudiante" aria-pressed="${S.modo === 'estudiante'}">Estudiante</button><button data-accion="modo-perfil" data-a="apoderado" aria-pressed="${S.modo === 'apoderado'}">Apoderado</button><button data-accion="modo-perfil" data-a="docente" aria-pressed="${S.modo === 'docente'}">Docente</button></div>
       <span class="nota">${S.modo === 'estudiante' ? 'Resultado acumulado, evolución y plan personal de mejora. Sin rankings.' : S.modo === 'apoderado' ? 'Lenguaje sencillo, fortalezas, evolución y orientaciones para la familia. Sin comparaciones con compañeros.' : 'Una ficha técnica por ensayo, con lugar en el curso, percentil y análisis técnico.'} Para filtrar por temática o período usa Informes.</span>
       <button class="btn primario" data-accion="informe-perfil" ${n ? '' : 'disabled'}>${ICONO.bajar} Descargar informe (${n} ensayo${n === 1 ? '' : 's'})</button>
+      ${S.modo === 'docente' ? '' : (() => {
+        const dest = S.modo === 'apoderado' ? est.correoApoderado : est.correo;
+        return dest ? `<button class="btn" data-accion="enviar-perfil" ${n ? '' : 'disabled'}>✉ Enviar por correo a ${h(dest)}</button>
+          <span class="nota">Se descarga el PDF y se abre tu correo con el destinatario, el asunto y el mensaje listos. Solo tienes que adjuntar el PDF y enviar.</span>`
+          : `<span class="nota">Para enviarlo por correo, agrega arriba el correo ${S.modo === 'apoderado' ? 'del apoderado' : 'del estudiante'}.</span>`;
+      })()}
     </section>`;
   }
-  async function descargarInformeEstudiante() {
+  // Arma el PDF del perfil según los ensayos marcados y el destinatario elegido
+  function crearInformeEstudiante() {
     const S = E.fichaSel, cur = cursoActivo();
     const elegidos = ensayosDelEstudiante(S.id, cur).map((o) => o.e).filter((e) => S.marcados.includes(e.id))
       .sort((a, b) => Estad.fechaOrden(a).localeCompare(Estad.fechaOrden(b)));
-    if (!elegidos.length) return;
+    if (!elegidos.length) return null;
+    const ultimo = elegidos[elegidos.length - 1];
+    const est = cur.estudiantes.find((e) => e.id === S.id);
+    const sufijo = elegidos.length === 1 ? Almacen.id(ultimo.nombre).slice(0, 30) : `${elegidos.length}_ensayos`;
+    if (S.modo !== 'docente') {
+      const ctxS = contextoEstudiante(cur, est, { ensayosEst: elegidos.map((e) => e.id), ejes: null, desde: '', hasta: '' });
+      return { est, cur, elegidos, nombre: `informe_${S.modo}_${Almacen.id(est.nombre)}_${sufijo}.pdf`, blob: Informe.acumulado(ctxS, S.modo) };
+    }
+    const base = contextoInforme(ultimo, elegidos.map((e) => e.id));
+    const porEnsayo = elegidos.map((e) => (e.id === ultimo.id ? base : contextoInforme(e, [e.id])));
+    return { est, cur, elegidos, nombre: `informe_docente_${Almacen.id(est.nombre)}_${sufijo}.pdf`, blob: Informe.estudiante(base, porEnsayo, S.id, S.modo) };
+  }
+  async function descargarInformeEstudiante() {
     toast('Preparando el informe…');
     try {
-      const ultimo = elegidos[elegidos.length - 1];
-      const est = cur.estudiantes.find((e) => e.id === S.id);
-      if (S.modo !== 'docente') {
-        const ctxS = contextoEstudiante(cur, est, { ensayosEst: elegidos.map((e) => e.id), ejes: null, desde: '', hasta: '' });
-        await descargar(`informe_${S.modo}_${Almacen.id(est.nombre)}_${elegidos.length === 1 ? Almacen.id(ultimo.nombre).slice(0, 30) : elegidos.length + '_ensayos'}.pdf`, Informe.acumulado(ctxS, S.modo));
-        return;
-      }
-      const base = contextoInforme(ultimo, elegidos.map((e) => e.id));
-      const porEnsayo = elegidos.map((e) => (e.id === ultimo.id ? base : contextoInforme(e, [e.id])));
-      const blob = Informe.estudiante(base, porEnsayo, S.id, S.modo);
-      const sufijo = elegidos.length === 1 ? Almacen.id(ultimo.nombre).slice(0, 30) : `${elegidos.length}_ensayos`;
-      await descargar(`informe_docente_${Almacen.id(est.nombre)}_${sufijo}.pdf`, blob);
+      const r = crearInformeEstudiante();
+      if (r) await descargar(r.nombre, r.blob);
     } catch (e) { console.error(e); toast('No se pudo crear el informe: ' + e.message); }
+  }
+  // Correo con destinatario, asunto y mensaje listos; el PDF queda descargado para adjuntarlo
+  async function enviarInformeEstudiante() {
+    const S = E.fichaSel;
+    try {
+      const r = crearInformeEstudiante();
+      if (!r) return;
+      const apo = S.modo === 'apoderado';
+      const para = apo ? r.est.correoApoderado : r.est.correo;
+      if (!para) { toast('Falta el correo.'); return; }
+      const col = config().colegio || {};
+      const ens = r.elegidos.length === 1 ? `el ensayo ${r.elegidos[0].nombre}` : `${r.elegidos.length} ensayos (${r.elegidos.map((e) => e.nombre).join(', ')})`;
+      const nombre = r.est.nombre.split(' ')[0];
+      const asunto = `Informe de resultados${apo ? ' de ' + r.est.nombre : ''} - ${r.elegidos.length === 1 ? r.elegidos[0].nombre : r.elegidos.length + ' ensayos'}`;
+      const cuerpo = apo
+        ? `Estimado(a) apoderado(a):\n\nLe envío adjunto el informe de resultados de ${r.est.nombre} (${r.cur.nombre}) en ${ens}. Incluye sus fortalezas, los aspectos por reforzar y orientaciones para acompañarlo(a) desde la casa.\n\nQuedo atento(a) a sus consultas.\n\nSaludos cordiales${col.nombre ? ',\n' + col.nombre : ''}`
+        : `Hola ${nombre}:\n\nTe envío adjunto tu informe de resultados en ${ens}. Ahí puedes ver en qué te fue bien, qué preguntas conviene repasar y un plan para seguir mejorando.\n\nCualquier duda, me preguntas en clases.\n\nSaludos${col.nombre ? ',\n' + col.nombre : ''}`;
+      await descargar(r.nombre, r.blob);
+      const a = document.createElement('a');
+      a.href = `mailto:${encodeURIComponent(para).replace(/%40/g, '@')}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+      a.target = '_top'; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+      toast(`Adjunta el archivo ${r.nombre} antes de enviar`);
+    } catch (e) { console.error(e); toast('No se pudo preparar el correo: ' + e.message); }
   }
 
   // Tablero del colegio: cada nivel y asignatura con resultados
@@ -1563,14 +1618,24 @@
     for (const [nombre, lista] of Object.entries(grupos)) {
       const id = Almacen.id(nombre);
       const curso = { id, nombre, estudiantes: [] };
+      const previo = Almacen.obtener('cursos', id);
+      const antes = new Map(((previo && previo.estudiantes) || []).map((e) => [e.id, e]));
       curso.estudiantes = lista.map((e) => ({ lista: e.lista, nombre: e.nombre, rut: e.rut }));
-      curso.estudiantes.forEach((e) => { e.id = idEstudiante(curso, e); });
+      curso.estudiantes.forEach((e, k) => {
+        e.id = idEstudiante(curso, e);
+        // Los correos de la planilla mandan; si vienen vacíos se conservan los que ya estaban guardados
+        const a = antes.get(e.id) || {};
+        const correo = lista[k].correo || a.correo, correoApoderado = lista[k].correoApoderado || a.correoApoderado;
+        if (correo) e.correo = correo;
+        if (correoApoderado) e.correoApoderado = correoApoderado;
+      });
       await Almacen.guardar('cursos', id, curso);
       ultimo = id;
     }
     if (!config().curso && ultimo) await fijarConfig({ curso: ultimo });
     const n = Object.keys(grupos).length;
-    toast(n === 1 ? `Curso ${Object.keys(grupos)[0]} cargado con ${estudiantes.length} estudiantes` : `${n} cursos cargados`);
+    const malos = estudiantes.correosInvalidos ? `. ${estudiantes.correosInvalidos} correo${estudiantes.correosInvalidos === 1 ? ' no es válido y quedó' : 's no son válidos y quedaron'} en blanco` : '';
+    toast((n === 1 ? `Curso ${Object.keys(grupos)[0]} cargado con ${estudiantes.length} estudiantes` : `${n} cursos cargados`) + malos);
   }
 
   async function generarHojas(ensayo, curso, formato) {
@@ -1678,6 +1743,8 @@
     },
     'modo-perfil': (a) => { E.fichaSel.modo = a; E.mantenerScroll = true; render(); },
     'informe-perfil': () => descargarInformeEstudiante(),
+    'enviar-perfil': () => enviarInformeEstudiante(),
+    'guardar-contacto': (a) => guardarContacto(a),
     'inf-asig': (a) => { const S = estadoInformes(); S.asig = a; S.ens = null; S.ensayosEst = null; E.mantenerScroll = true; render(); },
     'inf-ens': (a) => { estadoInformes().ens = a; E.mantenerScroll = true; render(); },
     'inf-nivel': (a) => { const S = estadoInformes(); S.nivel = a; S.cursos = []; E.mantenerScroll = true; render(); },
