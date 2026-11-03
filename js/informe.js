@@ -1576,7 +1576,7 @@ const Informe = (() => {
     const peor = ej[ej.length - 1];
     if (peor && peor.logro < 0.6) rec.push(`Prioridad institucional: ${peor.nombre}. Coordinar una unidad de refuerzo común en los niveles que rinden ${tipo}.`);
     rec.push(`Logro promedio considerando todos los ensayos: ${pct1(gTot)}, con ${evaluadosTot} hojas corregidas.`);
-    rec.push('El detalle de cada ensayo, con sus indicadores, comparación entre cursos y alertas, sigue en las páginas siguientes.');
+    if (M2.detalle) rec.push('El detalle de cada ensayo, con sus indicadores, comparación entre cursos y alertas, sigue en las páginas siguientes.');
     titulo(P, 'Síntesis', 4, 30);
     vinetas(P, rec, { tam: 10 });
   }
@@ -2020,11 +2020,10 @@ const Informe = (() => {
     seccionDirectivo(P, ctxD); piePaginas(P); return P.doc.output('blob');
   }
   // Varios ensayos y cursos: resumen consolidado y luego el detalle de cada ensayo por nivel
-  function directivoConsolidado(M2) {
+  function directivoConsolidado(M2, { detalle = false } = {}) {
     const P = docCon({ colegio: M2.colegio, ens: M2.ensayos[0] }, pieDe(M2, 'Resumen para equipo directivo', M2.tipo));
     seccionDirectivoConsolidado(P, M2);
-    M2.bloques.forEach((b, i) => { nuevaPagina(P); seccionDirectivo(P, b, { sinNota: true, numero: `Detalle ${i + 1}:` }); });
-    nuevaPagina(P);
+    if (detalle) { M2.bloques.forEach((b, i) => { nuevaPagina(P); seccionDirectivo(P, b, { sinNota: true, numero: `Detalle ${i + 1}:` }); }); nuevaPagina(P); }
     notaMetodologica(P, { tieneTabla: M2.ensayos.some((e) => Estad.tieneTabla(e)), tieneCortes: M2.bloques.some((b) => !!b.inst.estandares) });
     piePaginas(P); return P.doc.output('blob');
   }

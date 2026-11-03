@@ -156,6 +156,45 @@
   addEventListener('appinstalled', () => { pedidoInstalar = null; render(); });
   const instalada = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
   const enIphone = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+  // ---------- Protección de datos ----------
+  // En el navegador, los datos viven solo en este equipo: se cuentan los cambios desde el último respaldo
+  // y se pide al navegador que no borre el almacenamiento de la app.
+  const RESP = { cambios: 'lector-optico:cambios-sin-respaldo', fecha: 'lector-optico:ultimo-respaldo' };
+  const leerLocal = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+  const escribirLocal = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* sin almacenamiento */ } };
+  const cambiosSinRespaldo = () => parseInt(leerLocal(RESP.cambios) || '0', 10) || 0;
+  const ultimoRespaldo = () => leerLocal(RESP.fecha);
+  const guardarAlmacen = Almacen.guardar;
+  Almacen.guardar = async (col, id, valor) => {
+    const r = await guardarAlmacen(col, id, valor);
+    if (col !== 'config') escribirLocal(RESP.cambios, String(cambiosSinRespaldo() + 1));
+    return r;
+  };
+  let almacenamientoProtegido = null;
+  async function protegerAlmacenamiento() {
+    try {
+      if (!navigator.storage || !navigator.storage.persist) return;
+      almacenamientoProtegido = (await navigator.storage.persisted()) || (await navigator.storage.persist());
+    } catch (e) { /* el navegador no lo permite */ }
+  }
+  async function respaldarAhora() {
+    await descargar(`respaldo_lector_${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(Almacen.respaldo())], { type: 'application/json' }));
+    escribirLocal(RESP.cambios, '0'); escribirLocal(RESP.fecha, new Date().toISOString());
+    E.ocultarRespaldo = false; toast('Respaldo descargado. Guárdalo en Drive, OneDrive o un correo para tenerlo fuera de este equipo.');
+    E.mantenerScroll = true; render();
+  }
+  function avisoRespaldo() {
+    if (Almacen.modo === 'nube' || E.ocultarRespaldo) return '';
+    const n = cambiosSinRespaldo(), f = ultimoRespaldo();
+    const dias = f ? Math.floor((Date.now() - new Date(f).getTime()) / 86400000) : null;
+    const hayDatosPropios = Almacen.lista('resultados').some((r) => Object.keys(r.hojas || {}).length && !(Almacen.obtener('cursos', r.curso) || {}).ejemplo);
+    if (!hayDatosPropios || n === 0) return '';
+    if (!(n >= 15 || (dias != null && dias >= 7) || (f == null && n >= 5))) return '';
+    const cuando = f ? `Tu último respaldo fue ${dias === 0 ? 'hoy' : dias === 1 ? 'ayer' : `hace ${dias} días`}` : 'Aún no has descargado un respaldo';
+    return `<div class="aviso rev respaldo">${ICONO.alerta}<span><b>Respalda tus datos.</b> ${cuando} y ${f ? 'desde entonces hay' : 'ya llevas'} ${n} cambio${n === 1 ? '' : 's'} (hojas, cursos o ensayos). Tus datos están solo en este equipo: si se borra el navegador, se pierden.</span>
+      <div class="fila-botones"><button class="btn primario" data-accion="respaldo">${ICONO.bajar} Respaldar ahora</button><button class="btn" data-accion="ocultar-respaldo">Más tarde</button></div></div>`;
+  }
+
   function avisoInstalar() {
     if (instalada() || location.protocol === 'file:' || E.ocultarInstalar) return '';
     if (pedidoInstalar) return `<div class="aviso ok instalar">${ICONO.bajar}<span>Instala la app en este equipo para abrirla como una aplicación, incluso sin internet.</span><div class="fila-botones"><button class="btn primario" data-accion="instalar">Instalar app</button><button class="btn" data-accion="ocultar-instalar">Ahora no</button></div></div>`;
@@ -261,7 +300,7 @@
         ${col.nombre ? `<span class="portada-colegio">${col.logo ? `<img src="${col.logo.src}" alt="">` : ''}${h(col.nombre)}</span>` : ''}
         ${ensayos().length || cursos().length ? `<div class="portada-cifras"><span><b class="num">${ensayos().length}</b> ${ensayos().length === 1 ? 'ensayo' : 'ensayos'}</span><span><b class="num">${cursos().length}</b> ${cursos().length === 1 ? 'curso' : 'cursos'}</span><span><b class="num">${totalHojas}</b> hojas</span></div>` : ''}
       </header>
-      <div class="cuerpo">${avisoInstalar()}${tarjeta}
+      <div class="cuerpo">${avisoRespaldo()}${avisoInstalar()}${tarjeta}
         <button class="destacado-informes" data-accion="ir" data-a="informes">
           <span class="di-icono">${ICONO.informe}</span>
           <span class="di-texto"><b>Informes y análisis</b><span>Directivo, docente, estudiante y apoderados en PDF</span></span>
@@ -1328,7 +1367,8 @@
         ${ejes.length > 1 ? `<span class="etiqueta">Temáticas</span><div class="filtros">${chip('inf-eje', '__todas', !S.ejes, 'Todas')}${ejes.map((x) => chip('inf-eje', x, !!S.ejes && S.ejes.includes(x), x)).join('')}</div>` : ''}`;
     }
     if (S.dest === 'docente' || S.dest === 'completo') opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-fichas" aria-pressed="${S.fichas}"><span class="caja">${S.fichas ? ICONO.check : ''}</span><span class="principal"><b>Incluir fichas técnicas de cada estudiante</b><span>Agrega una página por estudiante, con su lugar en el curso y su análisis técnico.</span></span></button></div>`;
-    if (S.dest === 'directivo') opciones += '<span class="nota">El informe directivo no incluye nombres de estudiantes.</span>';
+    if (S.dest === 'directivo') opciones += `<div class="lista-elegir"><button class="opcion" data-accion="inf-dir-detalle" aria-pressed="${!!S.detalleDir}"><span class="caja">${S.detalleDir ? ICONO.check : ''}</span><span class="principal"><b>Incluir el detalle de cada ensayo</b><span>Agrega, después del resumen, los indicadores completos de cada ensayo por nivel. Sin esta opción, el informe queda en 2 o 3 páginas.</span></span></button></div>
+      <span class="nota">El informe directivo no incluye nombres de estudiantes.</span>`;
     // Paso 6: vista previa
     const cursosSel = S.cursos.map((id) => Almacen.obtener('cursos', id)).filter(Boolean);
     let previa = '';
@@ -1348,7 +1388,7 @@
         const ncur = new Set(M2.bloques.flatMap((b) => b.porCurso.map((x) => x.curso.id))).size;
         previa += `<div class="cifras cuatro"><div class="tarjeta"><span>Ensayos</span><b class="num">${M2.ensayos.length}</b></div><div class="tarjeta"><span>Cursos</span><b class="num">${ncur}</b></div>
           <div class="tarjeta"><span>Hojas corregidas</span><b class="num">${ev}</b></div><div class="tarjeta"><span>Logro promedio</span><b class="num">${pct(media)}</b></div></div>
-          <span class="nota">${M2.bloques.length > 1 ? `El PDF parte con un resumen de todos los cursos y ensayos (tabla curso por ensayo, participación, evolución, ejes y alertas) y sigue con el detalle de cada ensayo por nivel (${M2.bloques.length} secciones).` : 'Un solo ensayo y un nivel: se genera el informe directivo de ese ensayo.'}</span>`;
+          <span class="nota">${M2.bloques.length > 1 ? `Resumen de todos los cursos y ensayos: tabla curso por ensayo, participación, evolución, ejes y alertas.${S.detalleDir ? ` Después, el detalle de cada ensayo por nivel (${M2.bloques.length} secciones).` : ''}` : 'Un solo ensayo y un nivel: se genera el informe directivo de ese ensayo.'}</span>`;
       } else if (!individual || S.dest === 'completo') {
         const D = contextoDirectivo(ens, cursosSel, S.nivel), R = D.inst.resumen, al = Informe.vistaPrevia(D).alertas;
         previa += `<div class="cifras cuatro"><div class="tarjeta"><span>Evaluados</span><b class="num">${R.corregidas}<span style="font-size:14px">/${R.total}</span></b></div>
@@ -1402,7 +1442,7 @@
         const M2 = contextoDirectivoVarios(S, datosInformes().delGrupo);
         if (!M2.bloques.length) { toast('No hay hojas corregidas para esa selección.'); return; }
         if (M2.bloques.length === 1) { blob = Informe.directivo(M2.bloques[0]); archivo = `informe_directivo_${nombre(M2.bloques[0].nivel || 'cursos')}_${nombre(M2.bloques[0].ens.nombre)}.pdf`; }
-        else { blob = Informe.directivoConsolidado(M2); archivo = `informe_directivo_${nombre(S.asig || 'ensayos')}_${M2.ensayos.length}_ensayos.pdf`; }
+        else { M2.detalle = !!S.detalleDir; blob = Informe.directivoConsolidado(M2, { detalle: M2.detalle }); archivo = `informe_directivo_${nombre(S.asig || 'ensayos')}_${M2.ensayos.length}_ensayos.pdf`; }
       } else if (S.dest === 'docente') {
         blob = Informe.docente(contextoDocente(ens, curDoc, cursosSel), { fichas: S.fichas });
         archivo = `informe_docente_${nombre(curDoc.nombre)}_${nombre(ens.nombre)}.pdf`;
@@ -1464,7 +1504,8 @@
       <div class="cuerpo">
         ${seccionColegio()}
         <section class="tarjeta pad"><span class="etiqueta">Respaldo</span>
-          <span style="font-size:14px;color:var(--texto-2)">Descarga todos tus ensayos, cursos y resultados en un archivo. Sirve para cambiar de equipo o recuperar datos.</span>
+          <span style="font-size:14px;color:var(--texto-2)">Descarga todos tus ensayos, cursos y resultados en un archivo. Sirve para cambiar de equipo o recuperar datos. Guárdalo fuera de este equipo (Drive, OneDrive o un correo a ti mismo).</span>
+          ${Almacen.modo === 'nube' ? '' : `<span class="nota">${ultimoRespaldo() ? `Último respaldo: ${new Date(ultimoRespaldo()).toLocaleDateString('es-CL')}. Cambios desde entonces: ${cambiosSinRespaldo()}.` : 'Todavía no has descargado un respaldo en este equipo.'} ${almacenamientoProtegido === true ? 'El navegador mantendrá los datos de la app aunque necesite espacio.' : almacenamientoProtegido === false ? 'El navegador podría borrar los datos si se queda sin espacio: instalar la app y respaldar seguido ayuda a evitarlo.' : ''}</span>`}
           <div class="fila-botones"><button class="btn" data-accion="respaldo">${ICONO.bajar} Descargar</button><label class="btn" for="a-respaldo">${ICONO.subir} Restaurar</label></div>
           <input type="file" id="a-respaldo" accept=".json" class="oculto-visual" data-archivo="respaldo">
         </section>
@@ -2008,6 +2049,7 @@
       const S = estadoInformes(), { delGrupo } = datosInformes();
       S.ensDir = a === 'todos' ? null : [delGrupo[0].id]; S.cursosDir = null; E.mantenerScroll = true; render();
     },
+    'inf-dir-detalle': () => { const S = estadoInformes(); S.detalleDir = !S.detalleDir; E.mantenerScroll = true; render(); },
     'inf-dir-curso': (a) => {
       const S = estadoInformes(), { delGrupo } = datosInformes(), act = seleccionDirectiva(S, delGrupo).cursosSel.map((c) => c.id);
       const nuevo = act.includes(a) ? act.filter((x) => x !== a) : [...act, a];
@@ -2145,7 +2187,8 @@
       // Dentro de claude.ai no se permiten archivos .tex: se baja como .txt
       await descargar(E.texto.archivo + (dl ? '.tex.txt' : '.tex'), blob);
     },
-    respaldo: () => descargar(`respaldo_lector_${new Date().toISOString().slice(0, 10)}.json`, new Blob([JSON.stringify(Almacen.respaldo())], { type: 'application/json' })),
+    respaldo: () => respaldarAhora(),
+    'ocultar-respaldo': () => { E.ocultarRespaldo = true; E.mantenerScroll = true; render(); },
     plantilla: async (a) => {
       const b64 = (typeof PLANTILLAS_XLSX !== 'undefined') && PLANTILLAS_XLSX[a];
       if (!b64) { toast('No encontré la plantilla.'); return; }
@@ -2200,7 +2243,7 @@
         }
         if (el.dataset.archivo === 'curso') { await guardarCursosDesdeLista(await Excel.leerLista(archivos[0]), archivos[0].name); render(); }
         if (el.dataset.archivo === 'logo') { const logo = await leerLogo(archivos[0]); await fijarConfig({ colegio: { ...(config().colegio || {}), logo } }); toast('Logo guardado'); E.mantenerScroll = true; render(); }
-        if (el.dataset.archivo === 'respaldo') { await Almacen.restaurar(JSON.parse(await archivos[0].text())); toast('Respaldo restaurado'); render(); }
+        if (el.dataset.archivo === 'respaldo') { await Almacen.restaurar(JSON.parse(await archivos[0].text())); escribirLocal(RESP.cambios, '0'); escribirLocal(RESP.fecha, new Date().toISOString()); toast('Respaldo restaurado'); render(); }
       } catch (e) { toast(e.message || 'No pude leer ese archivo.'); }
     }
   });
@@ -2230,6 +2273,7 @@
   // Cada vez que se abre la app parte sin ensayo ni curso elegidos. Una recarga dentro de la misma sesión
   // (por ejemplo, al actualizarse la app a mitad de una corrección) mantiene la elección.
   const sesionNueva = (() => { try { if (sessionStorage.getItem('lector-sesion')) return false; sessionStorage.setItem('lector-sesion', '1'); } catch (e) { /* sin sessionStorage */ } return true; })();
+  protegerAlmacenamiento();
   Almacen.iniciar().then(async () => { if (sesionNueva && (config().ensayo || config().curso || (config().ensayosExtra || []).length)) await fijarConfig({ ensayo: null, curso: null, ensayosExtra: [] }); render(); }, () => render());
   render();
 })();
