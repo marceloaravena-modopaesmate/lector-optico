@@ -209,6 +209,7 @@
       <button class="btn-redondo" data-accion="ir" data-a="ajustes" aria-label="Ajustes y respaldo">${ICONO.ajustes}</button></header>
       <div class="cuerpo">${avisoInstalar()}${tarjeta}
         <div class="mosaico">
+          <button data-accion="ir" data-a="informes">${ICONO.informe}<b>Informes</b><span>Directivo, docente, estudiante y apoderados</span></button>
           <button data-accion="ir" data-a="ensayos">${ICONO.doc}<b>Ensayos</b><span>Claves, ejes y habilidades</span></button>
           <button data-accion="ir" data-a="cursos">${ICONO.grupo}<b>Cursos</b><span>Listas y hojas con QR</span></button>
           <button data-accion="ir-tab" data-a="curso">${ICONO.grafico}<b>Estadísticas</b><span>Curso, preguntas, estudiantes e historial</span></button>
@@ -556,7 +557,7 @@
     const seleccion = (elegidos || [ens.id]).map((id) => Almacen.obtener('ensayos', id)).filter(Boolean)
       .map((e) => ({ ens: e, A: e.id === ens.id ? A : Estad.analizar(e, cur, hojasDe(e, cur)) })).filter((x) => x.A.hechas.length)
       .sort((a, b) => Estad.fechaOrden(a.ens).localeCompare(Estad.fechaOrden(b.ens)));
-    return { ens, cur, A, H, AL: Estad.alertas(A, H), G: Estad.grupos(A, E.grupoPor || 'eje'), N, HN, nivel: nombreNivel(cur), colegio: config().colegio || {}, seleccion };
+    return { ens, cur, A, H, AL: Estad.alertas(A, H), G: Estad.grupos(A, E.grupoPor || 'eje'), N, HN, nivel: nombreNivel(cur), colegio: config().colegio || {}, seleccion, validacion: Estad.validar(ens, cur, hojasDe(ens, cur)) };
   }
   // Ensayos con hojas corregidas del curso activo, del más reciente al más antiguo
   function ensayosConHojas(cur) {
@@ -869,7 +870,7 @@
   // En el perfil: elegir ensayos y versión, y descargar el informe del estudiante
   function seccionInformeEstudiante(est, cur) {
     const suyos = ensayosDelEstudiante(est.id, cur);
-    if (!E.fichaSel || E.fichaSel.id !== est.id) E.fichaSel = { id: est.id, marcados: suyos.map((o) => o.e.id), modo: 'familia' };
+    if (!E.fichaSel || E.fichaSel.id !== est.id) E.fichaSel = { id: est.id, marcados: suyos.map((o) => o.e.id), modo: 'estudiante' };
     const S = E.fichaSel, n = S.marcados.filter((id) => suyos.some((o) => o.e.id === id)).length;
     return `<section class="tarjeta pad informe-estudiante"><span class="etiqueta">Informe PDF de ${h(corto(est.nombre))}</span>
       <span class="nota">Marca los ensayos que quieres incluir. Con más de uno, el informe parte con un resumen de todos y sigue con el detalle de cada ensayo.</span>
@@ -881,8 +882,8 @@
           <span class="resultado num"><b>${pct(x.logro)}</b><span>nota ${notaTx(x.nota)}</span></span></button>`;
       }).join('')}</div>
       <span class="etiqueta">¿Para quién es?</span>
-      <div class="segmento"><button data-accion="modo-perfil" data-a="familia" aria-pressed="${S.modo === 'familia'}">Estudiante y apoderado</button><button data-accion="modo-perfil" data-a="docente" aria-pressed="${S.modo === 'docente'}">Docente</button></div>
-      <span class="nota">${S.modo === 'familia' ? 'Sin lugar en el curso ni análisis técnico; incluye qué estudiar.' : 'Incluye lugar en el curso, percentil y análisis técnico.'}</span>
+      <div class="segmento tres"><button data-accion="modo-perfil" data-a="estudiante" aria-pressed="${S.modo === 'estudiante'}">Estudiante</button><button data-accion="modo-perfil" data-a="apoderado" aria-pressed="${S.modo === 'apoderado'}">Apoderado</button><button data-accion="modo-perfil" data-a="docente" aria-pressed="${S.modo === 'docente'}">Docente</button></div>
+      <span class="nota">${S.modo === 'estudiante' ? 'Resultado acumulado, evolución y plan personal de mejora. Sin rankings.' : S.modo === 'apoderado' ? 'Lenguaje sencillo, fortalezas, evolución y orientaciones para la familia. Sin comparaciones con compañeros.' : 'Una ficha técnica por ensayo, con lugar en el curso, percentil y análisis técnico.'} Para filtrar por temática o período usa Informes.</span>
       <button class="btn primario" data-accion="informe-perfil" ${n ? '' : 'disabled'}>${ICONO.bajar} Descargar informe (${n} ensayo${n === 1 ? '' : 's'})</button>
     </section>`;
   }
@@ -894,12 +895,17 @@
     toast('Preparando el informe…');
     try {
       const ultimo = elegidos[elegidos.length - 1];
+      const est = cur.estudiantes.find((e) => e.id === S.id);
+      if (S.modo !== 'docente') {
+        const ctxS = contextoEstudiante(cur, est, { ensayosEst: elegidos.map((e) => e.id), ejes: null, desde: '', hasta: '' });
+        await descargar(`informe_${S.modo}_${Almacen.id(est.nombre)}_${elegidos.length === 1 ? Almacen.id(ultimo.nombre).slice(0, 30) : elegidos.length + '_ensayos'}.pdf`, Informe.acumulado(ctxS, S.modo));
+        return;
+      }
       const base = contextoInforme(ultimo, elegidos.map((e) => e.id));
       const porEnsayo = elegidos.map((e) => (e.id === ultimo.id ? base : contextoInforme(e, [e.id])));
       const blob = Informe.estudiante(base, porEnsayo, S.id, S.modo);
-      const est = cur.estudiantes.find((e) => e.id === S.id);
       const sufijo = elegidos.length === 1 ? Almacen.id(ultimo.nombre).slice(0, 30) : `${elegidos.length}_ensayos`;
-      await descargar(`informe_${S.modo === 'familia' ? 'apoderado' : 'docente'}_${Almacen.id(est.nombre)}_${sufijo}.pdf`, blob);
+      await descargar(`informe_docente_${Almacen.id(est.nombre)}_${sufijo}.pdf`, blob);
     } catch (e) { console.error(e); toast('No se pudo crear el informe: ' + e.message); }
   }
 
@@ -947,11 +953,169 @@
           : '<div class="tarjeta vacio">Cuando haya hojas corregidas, aquí verás cada nivel y asignatura del colegio en una tabla.</div>'}
       </div>${nav('')}</div>`;
   }
+  // ---------- Informes y análisis de resultados ----------
+  const DESTINOS = [
+    { id: 'completo', nombre: 'Informe completo', detalle: 'Las cuatro secciones en un PDF: directivo, docente, estudiante y apoderados' },
+    { id: 'directivo', nombre: 'Equipo directivo', detalle: 'Visión global y comparación entre cursos, sin datos individuales' },
+    { id: 'docente', nombre: 'Docente', detalle: 'Diagnóstico del curso, pregunta por pregunta, comparación y plan de intervención' },
+    { id: 'estudiante', nombre: 'Estudiante', detalle: 'Informe individual acumulativo: uno o varios ensayos y temáticas' },
+    { id: 'apoderado', nombre: 'Padres y apoderados', detalle: 'Resultado, fortalezas y orientaciones para la familia, sin comparaciones' },
+  ];
+  const conHojasEn = (e, c) => Object.keys(hojasDe(e, c)).length > 0;
+  const enRango = (e, S) => { const f = Estad.fechaOrden(e); return (!S.desde || f >= S.desde) && (!S.hasta || f <= S.hasta); };
+
+  // Estado del módulo, con valores por defecto a partir del ensayo y curso activos
+  function estadoInformes() {
+    if (E.inf) return E.inf;
+    const ens = ensayoActivo(), cur = cursoActivo();
+    E.inf = { asig: ens ? Estad.grupoEnsayo(ens) : null, ens: ens ? ens.id : null, nivel: cur ? nombreNivel(cur) : null, cursos: cur ? [cur.id] : [], cursoDoc: cur ? cur.id : null,
+      dest: 'docente', est: null, ensayosEst: null, ejes: null, desde: '', hasta: '', fichas: false, todos: false };
+    return E.inf;
+  }
+  function datosInformes() {
+    const S = estadoInformes();
+    const conDatos = ensayos().filter((e) => cursos().some((c) => conHojasEn(e, c)));
+    const asigs = [...new Set(conDatos.map((e) => Estad.grupoEnsayo(e)))];
+    if (!asigs.includes(S.asig)) S.asig = asigs[0] || null;
+    const delGrupo = conDatos.filter((e) => Estad.grupoEnsayo(e) === S.asig).sort((a, b) => Estad.fechaOrden(b).localeCompare(Estad.fechaOrden(a)));
+    if (!delGrupo.some((e) => e.id === S.ens)) S.ens = delGrupo[0] ? delGrupo[0].id : null;
+    const ens = S.ens && Almacen.obtener('ensayos', S.ens);
+    const cursosEns = ens ? cursos().filter((c) => conHojasEn(ens, c)) : [];
+    const niveles = [...new Set(cursosEns.map((c) => nombreNivel(c)))];
+    if (!niveles.includes(S.nivel)) S.nivel = niveles[0] || null;
+    const delNivel = cursosEns.filter((c) => nombreNivel(c) === S.nivel);
+    S.cursos = S.cursos.filter((id) => delNivel.some((c) => c.id === id));
+    if (!S.cursos.length && delNivel.length) S.cursos = delNivel.map((c) => c.id);
+    if (!S.cursos.includes(S.cursoDoc)) S.cursoDoc = S.cursos[0] || null;
+    const curDoc = S.cursoDoc && Almacen.obtener('cursos', S.cursoDoc);
+    return { S, asigs, delGrupo, ens, delNivel, curDoc };
+  }
+  // Ensayos que rindió un estudiante (todas las asignaturas), filtrados por período
+  function ensayosEst(cur, idEst, S) {
+    return ensayos().filter((e) => hojasDe(e, cur)[idEst] && enRango(e, S)).sort((a, b) => Estad.fechaOrden(a).localeCompare(Estad.fechaOrden(b)));
+  }
+  function contextoDirectivo(ens, cursosSel, nivel) {
+    const porCurso = cursosSel.map((c, idx) => ({ curso: c, idx, A: Estad.analizar(ens, c, hojasDe(ens, c)) })).filter((x) => x.A.hechas.length);
+    const N = Estad.nivel(ens, porCurso.map((x) => x.curso), (c) => hojasDe(ens, c), nivel || 'Cursos seleccionados');
+    const vals = porCurso.map((x) => Estad.validar(ens, x.curso, hojasDe(ens, x.curso)));
+    const validacion = { errores: [...new Set(vals.flatMap((v) => v.errores))], avisos: [...new Set(vals.flatMap((v) => v.avisos))] };
+    validacion.ok = !validacion.errores.length;
+    return { ens, nivel, porCurso, inst: N.A, brechas: N.brechas, colegio: config().colegio || {}, validacion };
+  }
+  // Contexto del informe docente con los cursos elegidos para comparar
+  function contextoDocente(ens, cur, cursosSel) {
+    const ctx = contextoInforme(ens, [ens.id]);
+    if (cursosSel.length >= 2) ctx.N = Estad.nivel(ens, cursosSel, (c) => hojasDe(ens, c), nombreNivel(cur));
+    else ctx.N = null;
+    return ctx;
+  }
+  function contextoEstudiante(cur, est, S) {
+    const ids = S.ensayosEst || ensayosEst(cur, est.id, S).map((e) => e.id);
+    const sel = ids.map((id) => Almacen.obtener('ensayos', id)).filter((e) => e && hojasDe(e, cur)[est.id] && enRango(e, S))
+      .map((e) => ({ ens: e, A: Estad.analizar(e, cur, hojasDe(e, cur)) })).sort((a, b) => Estad.fechaOrden(a.ens).localeCompare(Estad.fechaOrden(b.ens)));
+    return { cur, est, sel, ejes: S.ejes, colegio: config().colegio || {} };
+  }
+
   function pInformes() {
-    return `<div class="pantalla">${cabecera('Informes', '')}<div class="cuerpo"><div class="tarjeta pad">
-      <span class="etiqueta">Próximamente</span>
-      <span>Los informes en PDF y Word por curso y por estudiante llegan en el paso 4. Por ahora puedes exportar los resultados a Excel desde Resultados.</span>
-      <button class="btn" data-accion="ir" data-a="curso">Ir a Resultados</button></div></div>${nav('')}</div>`;
+    const { S, asigs, delGrupo, ens, delNivel, curDoc } = datosInformes();
+    if (!ens) return `<div class="pantalla">${cabecera('Informes y análisis', '')}<div class="cuerpo"><div class="tarjeta vacio">Cuando tengas hojas corregidas podrás generar aquí los informes.</div></div>${nav('')}</div>`;
+    const guardadas = config().informesGuardados || [];
+    const paso = (n, t, cuerpo) => `<section class="tarjeta pad paso-inf"><span class="etiqueta"><b class="num">${n}</b> ${h(t)}</span>${cuerpo}</section>`;
+    const chip = (accion, a, on, texto) => `<button data-accion="${accion}" data-a="${h(a)}" aria-pressed="${on}">${h(texto)}</button>`;
+    const opcion = (accion, a, on, titulo, sub, extra = '') => `<button class="opcion" data-accion="${accion}" data-a="${h(a)}" aria-pressed="${on}"><span class="caja">${on ? ICONO.check : ''}</span><span class="principal"><b>${h(titulo)}</b>${sub ? `<span>${h(sub)}</span>` : ''}</span>${extra}</button>`;
+    const individual = ['estudiante', 'apoderado', 'completo'].includes(S.dest);
+    // Paso 5: opciones según destinatario
+    let opciones = '';
+    const conEst = curDoc ? curDoc.estudiantes.filter((e) => ensayos().some((x) => hojasDe(x, curDoc)[e.id])) : [];
+    if (individual && curDoc) {
+      if (!S.todos && !conEst.some((e) => e.id === S.est)) S.est = conEst[0] ? conEst[0].id : null;
+      const ref = S.todos ? conEst[0] : conEst.find((e) => e.id === S.est);
+      const disponibles = ref ? (S.todos ? [...new Map(conEst.flatMap((e) => ensayosEst(curDoc, e.id, S)).map((x) => [x.id, x])).values()].sort((a, b) => Estad.fechaOrden(a).localeCompare(Estad.fechaOrden(b))) : ensayosEst(curDoc, ref.id, S)) : [];
+      if (!S.ensayosEst) S.ensayosEst = disponibles.filter((e) => Estad.grupoEnsayo(e) === S.asig).map((e) => e.id);
+      S.ensayosEst = S.ensayosEst.filter((id) => disponibles.some((e) => e.id === id));
+      const ejes = [...new Set(disponibles.filter((e) => S.ensayosEst.includes(e.id)).flatMap((e) => e.preguntas.filter((p) => !p.piloto).map((p) => p.eje || 'Sin dato')))];
+      if (S.ejes) S.ejes = S.ejes.filter((x) => ejes.includes(x));
+      opciones += `<label class="campo" for="inf-est">Estudiante<select id="inf-est" data-cambio="inf-est">
+          <option value="__todos" ${S.todos ? 'selected' : ''}>Todos los estudiantes del curso (${conEst.length})</option>
+          ${conEst.map((e) => `<option value="${h(e.id)}" ${!S.todos && e.id === S.est ? 'selected' : ''}>${e.lista}. ${h(e.nombre)}</option>`).join('')}</select></label>
+        <div class="dos"><label class="campo" for="inf-desde">Desde<input type="date" id="inf-desde" data-cambio="inf-desde" value="${h(S.desde)}"></label>
+        <label class="campo" for="inf-hasta">Hasta<input type="date" id="inf-hasta" data-cambio="inf-hasta" value="${h(S.hasta)}"></label></div>
+        <span class="nota">Ensayos ${S.todos ? 'del curso' : 'que rindió'} en el período. Puedes mezclar asignaturas: cada instrumento se informa por separado, con su escala.</span>
+        <div class="filtros"><button data-accion="inf-ens-grupo" data-a="todos">Todos</button><button data-accion="inf-ens-grupo" data-a="asig">Solo ${h(S.asig)}</button><button data-accion="inf-ens-grupo" data-a="ninguno">Ninguno</button></div>
+        <div class="lista-elegir">${disponibles.map((e) => opcion('inf-ens-est', e.id, S.ensayosEst.includes(e.id), e.nombre, [e.asignatura, e.fecha, `${e.preguntas.filter((p) => !p.piloto).length} preguntas`].filter(Boolean).join(' · '))).join('') || '<span class="nota">No hay ensayos en ese período.</span>'}</div>
+        ${ejes.length > 1 ? `<span class="etiqueta">Temáticas</span><div class="filtros">${chip('inf-eje', '__todas', !S.ejes, 'Todas')}${ejes.map((x) => chip('inf-eje', x, !!S.ejes && S.ejes.includes(x), x)).join('')}</div>` : ''}`;
+    }
+    if (S.dest === 'docente' || S.dest === 'completo') opciones += `<button class="opcion" data-accion="inf-fichas" aria-pressed="${S.fichas}"><span class="caja">${S.fichas ? ICONO.check : ''}</span><span class="principal"><b>Incluir fichas técnicas de cada estudiante</b><span>Una página por estudiante, con lugar en el curso y análisis técnico</span></span></button>`;
+    if (S.dest === 'directivo') opciones += '<span class="nota">El informe directivo no incluye nombres de estudiantes.</span>';
+    // Paso 6: vista previa
+    const cursosSel = S.cursos.map((id) => Almacen.obtener('cursos', id)).filter(Boolean);
+    let previa = '';
+    try {
+      if (individual && curDoc && (S.est || S.todos)) {
+        const est = S.todos ? null : curDoc.estudiantes.find((e) => e.id === S.est);
+        if (est) {
+          const cs = contextoEstudiante(curDoc, est, S), C2 = Estad.consolidar(est.id, cs.sel, S.ejes);
+          previa += `<span class="nota">${h(corto(est.nombre))}: ${cs.sel.length} ensayo${cs.sel.length === 1 ? '' : 's'} seleccionado${cs.sel.length === 1 ? '' : 's'}${S.ejes ? `, temáticas: ${h(S.ejes.join(', '))}` : ''}.</span>
+            <div class="tabla-mini"><table><thead><tr><th>Instrumento</th><th class="num">Ensayos</th><th class="num">Correctas</th><th class="num">Logro</th></tr></thead><tbody>
+            ${C2.map((g) => `<tr><td class="ajusta">${h(g.nombre)}</td><td class="num">${g.cantidad}</td><td class="num">${g.correctas}/${g.preguntas}</td><td class="num">${pct(g.logro)}</td></tr>`).join('') || '<tr><td colspan="4">Sin datos para esa selección</td></tr>'}</tbody></table></div>`;
+        } else previa += `<span class="nota">Se generará un informe por cada uno de los ${conEst.length} estudiantes con los ensayos marcados.</span>`;
+      }
+      if (!individual || S.dest === 'completo') {
+        const D = contextoDirectivo(ens, cursosSel, S.nivel), R = D.inst.resumen, al = Informe.vistaPrevia(D).alertas;
+        previa += `<div class="cifras cuatro"><div class="tarjeta"><span>Evaluados</span><b class="num">${R.corregidas}<span style="font-size:14px">/${R.total}</span></b></div>
+          <div class="tarjeta"><span>Participación</span><b class="num">${pct(R.participacion)}</b></div><div class="tarjeta"><span>Logro promedio</span><b class="num">${pct(R.media)}</b></div>
+          <div class="tarjeta"><span>Alertas</span><b class="num">${al.length}</b></div></div>
+          ${D.porCurso.length >= 2 ? `<div class="tabla-mini"><table><thead><tr><th>Curso</th><th class="num">Evaluados</th><th class="num">Promedio</th><th class="num">Dif.</th></tr></thead><tbody>${D.porCurso.map((x) => `<tr><td>${h(x.curso.nombre)}</td><td class="num">${x.A.resumen.corregidas}/${x.A.resumen.total}</td><td class="num">${pct(x.A.resumen.media)}</td><td class="num">${Math.round((x.A.resumen.media - R.media) * 100)} pp</td></tr>`).join('')}</tbody></table></div>` : ''}
+          ${D.validacion.errores.length ? `<div class="aviso mal">${ICONO.alerta}<span><b>Problemas en los datos:</b> ${h(D.validacion.errores.join(' '))}</span></div>` : ''}
+          ${D.validacion.avisos.length ? `<div class="aviso rev">${ICONO.alerta}<span>${h(D.validacion.avisos.join(' '))}</span></div>` : ''}`;
+      }
+    } catch (e) { console.error(e); previa = `<span class="nota">No se pudo calcular la vista previa: ${h(e.message)}</span>`; }
+    return `<div class="pantalla">${cabecera('Informes y análisis', 'Resultados para cada destinatario')}<div class="cuerpo informes">
+      ${guardadas.length ? `<section class="tarjeta pad"><span class="etiqueta">Configuraciones guardadas</span><div class="filtros">${guardadas.map((g, i) => `<button data-accion="inf-cargar" data-a="${i}">${h(g.nombre)}</button>`).join('')}</div>
+        <button class="btn-texto" data-accion="inf-borrar-guardadas">Borrar las configuraciones guardadas</button></section>` : ''}
+      ${paso(1, 'Tipo de evaluación', `<div class="filtros">${asigs.map((a) => chip('inf-asig', a, a === S.asig, a)).join('')}</div>`)}
+      ${paso(2, 'Ensayo', `<div class="lista-elegir">${delGrupo.map((e) => opcion('inf-ens', e.id, e.id === S.ens, e.nombre, [e.fecha, `${cursos().filter((c) => conHojasEn(e, c)).length} cursos con hojas`].filter(Boolean).join(' · '))).join('')}</div>`)}
+      ${paso(3, 'Nivel y cursos', `${(() => { const nvs = [...new Set(cursos().filter((c) => conHojasEn(ens, c)).map((c) => nombreNivel(c)))]; return nvs.length > 1 ? `<div class="filtros">${nvs.map((n) => chip('inf-nivel', n, n === S.nivel, n)).join('')}</div>` : ''; })()}
+        <span class="nota">Marca los cursos que quieres comparar.</span>
+        <div class="filtros">${delNivel.map((c) => chip('inf-curso', c.id, S.cursos.includes(c.id), c.nombre)).join('')}</div>
+        ${S.cursos.length > 1 && S.dest !== 'directivo' ? `<span class="etiqueta">Curso del informe docente e individual</span><div class="filtros">${S.cursos.map((id) => chip('inf-curso-doc', id, id === S.cursoDoc, (Almacen.obtener('cursos', id) || {}).nombre || id)).join('')}</div>` : ''}`)}
+      ${paso(4, 'Destinatario', `<div class="lista-elegir">${DESTINOS.map((d) => opcion('inf-dest', d.id, d.id === S.dest, d.nombre, d.detalle)).join('')}</div>`)}
+      ${opciones ? paso(5, 'Opciones', opciones) : ''}
+      ${paso(opciones ? 6 : 5, 'Vista previa', previa || '<span class="nota">Elige las opciones de arriba.</span>')}
+      <button class="btn primario grande" data-accion="inf-generar">${ICONO.bajar} Generar PDF</button>
+      <div class="fila-guardar"><input id="inf-nombre" placeholder="Nombre de la configuración, ej.: II medio M1 directivo"><button class="btn" data-accion="inf-guardar">Guardar</button></div>
+    </div>${nav('')}</div>`;
+  }
+
+  async function generarInformeModulo() {
+    const { S, ens, curDoc } = datosInformes();
+    if (!ens) return;
+    const cursosSel = S.cursos.map((id) => Almacen.obtener('cursos', id)).filter(Boolean);
+    toast('Preparando el informe…');
+    try {
+      const nombre = (s) => Almacen.id(s).slice(0, 30);
+      const estudiantesSel = () => {
+        const lista = S.todos ? curDoc.estudiantes.filter((e) => ensayos().some((x) => hojasDe(x, curDoc)[e.id])) : curDoc.estudiantes.filter((e) => e.id === S.est);
+        return lista.map((e) => contextoEstudiante(curDoc, e, S)).filter((c) => c.sel.length);
+      };
+      let blob, archivo;
+      if (S.dest === 'directivo') {
+        blob = Informe.directivo(contextoDirectivo(ens, cursosSel, S.nivel));
+        archivo = `informe_directivo_${nombre(S.nivel || 'cursos')}_${nombre(ens.nombre)}.pdf`;
+      } else if (S.dest === 'docente') {
+        blob = Informe.docente(contextoDocente(ens, curDoc, cursosSel), { fichas: S.fichas });
+        archivo = `informe_docente_${nombre(curDoc.nombre)}_${nombre(ens.nombre)}.pdf`;
+      } else if (S.dest === 'completo') {
+        blob = Informe.completo({ dir: contextoDirectivo(ens, cursosSel, S.nivel), doc: contextoDocente(ens, curDoc, cursosSel), estudiantes: estudiantesSel(), fichas: S.fichas });
+        archivo = `informe_completo_${nombre(curDoc.nombre)}_${nombre(ens.nombre)}.pdf`;
+      } else {
+        const lista = estudiantesSel();
+        if (!lista.length) { toast('No hay ensayos para esa selección.'); return; }
+        blob = Informe.acumulado(lista.length === 1 ? lista[0] : lista, S.dest);
+        archivo = `informe_${S.dest}_${lista.length === 1 ? nombre(lista[0].est.nombre) : nombre(curDoc.nombre) + '_todos'}.pdf`;
+      }
+      await descargar(archivo, blob);
+    } catch (e) { console.error(e); toast('No se pudo crear el informe: ' + e.message); }
   }
 
   // Datos del colegio para los informes: nombre, responsable, logo y metas
@@ -1015,6 +1179,19 @@
             <label class="campo" for="a-omision">Omisión: más de (%)<input id="a-omision" inputmode="decimal" value="${Math.round(Estad.conf.umbrales.omision * 100)}"></label>
           </div>
           <span class="nota">La nota usa la escala de 1,0 a 7,0. Bajo logro también define quién entra a los grupos de reforzamiento.</span>
+          <span class="etiqueta">Niveles de desempeño (no son cortes oficiales)</span>
+          <div class="dos">
+            <label class="campo" for="a-nv-medio">Medio desde (%)<input id="a-nv-medio" inputmode="decimal" value="${Math.round(Estad.conf.niveles.medio * 100)}"></label>
+            <label class="campo" for="a-nv-alto">Alto desde (%)<input id="a-nv-alto" inputmode="decimal" value="${Math.round(Estad.conf.niveles.alto * 100)}"></label>
+          </div>
+          <span class="etiqueta">Alertas del informe directivo</span>
+          <div class="dos">
+            <label class="campo" for="a-i-brecha">Curso bajo el promedio por (pp)<input id="a-i-brecha" inputmode="decimal" value="${Math.round(Estad.conf.institucional.brechaCurso * 100)}"></label>
+            <label class="campo" for="a-i-eje">Eje bajo (%)<input id="a-i-eje" inputmode="decimal" value="${Math.round(Estad.conf.institucional.ejeBajo * 100)}"></label>
+            <label class="campo" for="a-i-part">Participación baja: menos de (%)<input id="a-i-part" inputmode="decimal" value="${Math.round(Estad.conf.institucional.participacion * 100)}"></label>
+            <label class="campo" for="a-i-disp">Dispersión alta: desv. desde (pp)<input id="a-i-disp" inputmode="decimal" value="${Math.round(Estad.conf.institucional.dispersion * 100)}"></label>
+            <label class="campo" for="a-i-conc">Nivel Bajo: desde (% del curso)<input id="a-i-conc" inputmode="decimal" value="${Math.round(Estad.conf.institucional.concentracionBaja * 100)}"></label>
+          </div>
           <button class="btn" data-accion="guardar-ajustes">Guardar</button>
         </section>
         <section class="tarjeta pad"><span class="etiqueta">Datos de ejemplo</span>
@@ -1412,7 +1589,11 @@
       const riesgo = num('a-riesgo') / 100, baja = num('a-baja') / 100, omision = num('a-omision') / 100;
       if (!(exigencia > 0 && exigencia < 1) || !(aprobacion > 1 && aprobacion < 7)) { toast('Revisa la exigencia (entre 1 y 99%) y la nota de aprobación (entre 1,0 y 7,0).'); return; }
       if (![riesgo, baja, omision].every((v) => v >= 0 && v <= 1)) { toast('Los umbrales de alerta van entre 0 y 100.'); return; }
-      await fijarConfig({ escala: { ...Estad.conf.escala, exigencia, aprobacion }, umbrales: { riesgo, baja, omision } });
+      const medio = num('a-nv-medio') / 100, alto = num('a-nv-alto') / 100;
+      if (!(medio > 0 && alto > medio && alto < 1)) { toast('Revisa los niveles: Medio debe ser menor que Alto, ambos entre 1 y 99%.'); return; }
+      const inst = { brechaCurso: num('a-i-brecha') / 100, ejeBajo: num('a-i-eje') / 100, participacion: num('a-i-part') / 100, dispersion: num('a-i-disp') / 100, concentracionBaja: num('a-i-conc') / 100 };
+      if (!Object.values(inst).every((v) => v >= 0 && v <= 1)) { toast('Las alertas del informe directivo van entre 0 y 100.'); return; }
+      await fijarConfig({ escala: { ...Estad.conf.escala, exigencia, aprobacion }, umbrales: { riesgo, baja, omision }, niveles: { medio, alto }, institucional: inst });
       toast('Ajustes guardados'); E.mantenerScroll = true; render();
     },
     'ejemplo-colegio': async () => { toast('Creando el ejemplo…'); await Ejemplo.colegio(); await fijarConfig({ ensayo: Ejemplo.ULTIMO_ENSAYO, curso: Ejemplo.CURSO_INICIAL }); toast('Listo: II medio A, B y C con tres ensayos corregidos'); E.tabEst = 'nivel'; ir('estadisticas'); },
@@ -1458,6 +1639,36 @@
     },
     'modo-perfil': (a) => { E.fichaSel.modo = a; E.mantenerScroll = true; render(); },
     'informe-perfil': () => descargarInformeEstudiante(),
+    'inf-asig': (a) => { const S = estadoInformes(); S.asig = a; S.ens = null; S.ensayosEst = null; E.mantenerScroll = true; render(); },
+    'inf-ens': (a) => { estadoInformes().ens = a; E.mantenerScroll = true; render(); },
+    'inf-nivel': (a) => { const S = estadoInformes(); S.nivel = a; S.cursos = []; E.mantenerScroll = true; render(); },
+    'inf-curso': (a) => { const S = estadoInformes(); S.cursos = S.cursos.includes(a) ? S.cursos.filter((x) => x !== a) : [...S.cursos, a]; if (!S.cursos.length) S.cursos = [a]; E.mantenerScroll = true; render(); },
+    'inf-curso-doc': (a) => { const S = estadoInformes(); S.cursoDoc = a; S.est = null; S.ensayosEst = null; E.mantenerScroll = true; render(); },
+    'inf-dest': (a) => { estadoInformes().dest = a; E.mantenerScroll = true; render(); },
+    'inf-fichas': () => { const S = estadoInformes(); S.fichas = !S.fichas; E.mantenerScroll = true; render(); },
+    'inf-ens-est': (a) => { const S = estadoInformes(); S.ensayosEst = (S.ensayosEst || []).includes(a) ? S.ensayosEst.filter((x) => x !== a) : [...(S.ensayosEst || []), a]; E.mantenerScroll = true; render(); },
+    'inf-ens-grupo': (a) => {
+      const S = estadoInformes(), cur = Almacen.obtener('cursos', S.cursoDoc);
+      const est = S.todos ? cur.estudiantes : cur.estudiantes.filter((e) => e.id === S.est);
+      const disp = [...new Map(est.flatMap((e) => ensayosEst(cur, e.id, S)).map((x) => [x.id, x])).values()];
+      S.ensayosEst = a === 'ninguno' ? [] : disp.filter((e) => a === 'todos' || Estad.grupoEnsayo(e) === S.asig).map((e) => e.id);
+      E.mantenerScroll = true; render();
+    },
+    'inf-eje': (a) => {
+      const S = estadoInformes();
+      if (a === '__todas') S.ejes = null;
+      else { const actual = S.ejes || []; S.ejes = actual.includes(a) ? actual.filter((x) => x !== a) : [...actual, a]; if (!S.ejes.length) S.ejes = null; }
+      E.mantenerScroll = true; render();
+    },
+    'inf-generar': () => generarInformeModulo(),
+    'inf-guardar': async () => {
+      const el = document.getElementById('inf-nombre'), nombre = (el && el.value.trim()) || `Configuración ${(config().informesGuardados || []).length + 1}`;
+      const { est, ...resto } = estadoInformes();
+      await fijarConfig({ informesGuardados: [...(config().informesGuardados || []), { nombre, estado: JSON.parse(JSON.stringify({ ...resto, est })) }] });
+      toast('Configuración guardada'); E.mantenerScroll = true; render();
+    },
+    'inf-cargar': (a) => { const g = (config().informesGuardados || [])[+a]; if (g) { E.inf = JSON.parse(JSON.stringify(g.estado)); toast(`Cargada: ${g.nombre}`); render(); } },
+    'inf-borrar-guardadas': async () => { await fijarConfig({ informesGuardados: [] }); toast('Configuraciones borradas'); render(); },
     'marcar-ensayo': (a) => { const m = E.elegirInforme.marcados; E.elegirInforme.marcados = m.includes(a) ? m.filter((x) => x !== a) : [...m, a]; E.mantenerScroll = true; render(); },
     'marcar-grupo': (a) => {
       const act = ensayoActivo(), lista = ensayosConHojas(cursoActivo());
@@ -1529,6 +1740,8 @@
     const el = ev.target;
     if (el.dataset.cambio === 'ensayo') { await fijarConfig({ ensayo: el.value }); render(); }
     if (el.dataset.cambio === 'curso') { await fijarConfig({ curso: el.value }); render(); }
+    if (el.dataset.cambio === 'inf-est') { const S = estadoInformes(); S.todos = el.value === '__todos'; S.est = S.todos ? null : el.value; S.ensayosEst = null; S.ejes = null; E.mantenerScroll = true; render(); }
+    if (el.dataset.cambio === 'inf-desde' || el.dataset.cambio === 'inf-hasta') { const S = estadoInformes(); S[el.dataset.cambio.slice(4)] = el.value; S.ensayosEst = null; E.mantenerScroll = true; render(); }
     if (el.dataset.cambio === 'estudiante' && el.value) {
       const rev = E.revision;
       const cur = rev.curso || cursoActivo();

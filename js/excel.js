@@ -39,7 +39,11 @@ const Excel = (() => {
       const clave = texto(f[1]).toUpperCase();
       if (!n || !/^[A-E]$/.test(clave)) return;
       const piloto = /^(s|x|1|p|y)/i.test(texto(f[5]));
-      preguntas.push({ n, clave, eje: texto(f[2]), habilidad: texto(f[3]), contenido: texto(f[4]), ...(piloto ? { piloto: true } : {}) });
+      // Opcionales: OA, enunciado y errores por alternativa ("A: …; C: …")
+      const oa = texto(f[6]), enunciado = texto(f[7]), errores = {};
+      texto(f[8]).split(/;|\n/).forEach((t) => { const m = t.trim().match(/^([A-E])\s*[:)\-.]\s*(.+)$/i); if (m) errores[m[1].toUpperCase()] = m[2].trim(); });
+      preguntas.push({ n, clave, eje: texto(f[2]), habilidad: texto(f[3]), contenido: texto(f[4]), ...(piloto ? { piloto: true } : {}),
+        ...(oa ? { oa } : {}), ...(enunciado ? { enunciado } : {}), ...(Object.keys(errores).length ? { errores } : {}) });
     });
     preguntas.sort((a, b) => a.n - b.n);
     if (!preguntas.length) throw new Error('No encontré preguntas con clave (A a E) en la hoja "Preguntas".');
@@ -174,11 +178,11 @@ const Excel = (() => {
       ...A.hechas.map((x) => [x.e.lista, x.e.nombre, ...x.r]),
     ], [9, 34]);
     agregar('Por pregunta', [
-      ['Pregunta', 'Clave', 'Eje / Contenido', 'Habilidad', 'Contenido específico', 'Piloto', '% acierto', 'Discriminación', 'Crítica', ...letras.map((l) => '% ' + l), '% omitida'],
-      ...A.preguntas.map((p) => [p.n, p.clave, p.eje, p.habilidad, p.contenido || '', p.piloto ? 'Sí (no cuenta)' : '', pct(p.acierto),
+      ['Pregunta', 'Clave', 'Eje / Contenido', 'Habilidad', 'Contenido específico', 'OA', 'Piloto', '% acierto', 'Discriminación', 'Crítica', ...letras.map((l) => '% ' + l), '% omitida'],
+      ...A.preguntas.map((p) => [p.n, p.clave, p.eje, p.habilidad, p.contenido || '', p.oa || '', p.piloto ? 'Sí (no cuenta)' : '', pct(p.acierto),
         p.discriminacion == null ? '' : Math.round(p.discriminacion * 100) / 100, p.critica ? 'Sí' : '',
         ...letras.map((l) => pct((p.cuenta[l] || 0) / (p.total || 1))), pct(p.omision)]),
-    ], [9, 7, 28, 22, 26, 10, 13, 8]);
+    ], [9, 7, 28, 22, 26, 10, 10, 13, 8]);
     agregar('Por eje', [['Eje / Contenido', 'Preguntas', '% logro'], ...A.porEje.map((g) => [g.nombre, g.preguntas, pct(g.logro)])], [30, 10, 10]);
     agregar('Por habilidad', [['Habilidad', 'Preguntas', '% logro'], ...A.porHabilidad.map((g) => [g.nombre, g.preguntas, pct(g.logro)])], [30, 10, 10]);
     agregar('Eje x habilidad', [

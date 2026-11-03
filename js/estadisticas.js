@@ -22,12 +22,18 @@ const Estad = (() => {
   const POR_DEFECTO = {
     escala: { exigencia: 0.6, minima: 1, maxima: 7, aprobacion: 4 },
     umbrales: { riesgo: 0.5, baja: 0.1, omision: 0.25 },
+    // Niveles de desempeño por % de logro (no son cortes oficiales de PAES ni SIMCE)
+    niveles: { medio: 0.5, alto: 0.75 },
+    // Alertas institucionales del informe directivo
+    institucional: { brechaCurso: 0.08, ejeBajo: 0.5, participacion: 0.85, dispersion: 0.2, concentracionBaja: 0.4 },
   };
   let conf = JSON.parse(JSON.stringify(POR_DEFECTO));
   function configurar(c) {
     conf = {
       escala: { ...POR_DEFECTO.escala, ...((c && c.escala) || {}) },
       umbrales: { ...POR_DEFECTO.umbrales, ...((c && c.umbrales) || {}) },
+      niveles: { ...POR_DEFECTO.niveles, ...((c && c.niveles) || {}) },
+      institucional: { ...POR_DEFECTO.institucional, ...((c && c.institucional) || {}) },
     };
   }
 
@@ -48,7 +54,71 @@ const Estad = (() => {
     return Math.sqrt(xs.reduce((s, x) => s + (x - m) ** 2, 0) / (xs.length - 1));
   }
 
-  function tramoDe(logro) { return TRAMOS.find((t) => logro >= t.desde && logro < t.hasta) || TRAMOS[0]; }
+  // Tramos con los cortes configurados en Ajustes
+  function tramos() {
+    const { medio, alto } = conf.niveles, p = (v) => Math.round(v * 100);
+    return [
+      { id: 'bajo', nombre: 'Bajo', desde: 0, hasta: medio, texto: `menos de ${p(medio)}%` },
+      { id: 'medio', nombre: 'Medio', desde: medio, hasta: alto, texto: `${p(medio)}% a ${p(alto) - 1}%` },
+      { id: 'alto', nombre: 'Alto', desde: alto, hasta: 1.01, texto: `${p(alto)}% o más` },
+    ];
+  }
+  function tramoDe(logro) { const T = tramos(); return T.find((t) => logro >= t.desde && logro < t.hasta) || T[0]; }
+
+  /**
+   * Indicadores descriptivos de una lista de números.
+   * Varianza y desviación estándar son MUESTRALES (dividen por n − 1), igual en toda la app.
+   * Cuartiles por interpolación lineal entre posiciones (método 7 de Hyndman y Fan, el de Excel CUARTIL.INC).
+   * Moda: los valores que más se repiten; vacía si ningún valor se repite.
+   */
+  function describir(xs) {
+    const n = xs.length;
+    if (!n) return { n: 0, suma: 0, media: null, mediana: null, moda: [], varianza: null, desviacion: null, min: null, max: null, q1: null, q3: null, iqr: null };
+    const m = media(xs);
+    const varianza = n > 1 ? xs.reduce((s, x) => s + (x - m) ** 2, 0) / (n - 1) : 0;
+    const frec = new Map();
+    xs.forEach((x) => { const k = Math.round(x * 1e6) / 1e6; frec.set(k, (frec.get(k) || 0) + 1); });
+    const tope = Math.max(...frec.values());
+    const moda = tope > 1 ? [...frec].filter(([, f]) => f === tope).map(([v]) => v).sort((a, b) => a - b) : [];
+    const q1 = cuantil(xs, 0.25), q3 = cuantil(xs, 0.75);
+    return { n, suma: xs.reduce((s, x) => s + x, 0), media: m, mediana: mediana(xs), moda, varianza, desviacion: Math.sqrt(varianza), min: Math.min(...xs), max: Math.max(...xs), q1, q3, iqr: q3 - q1 };
+  }
+
+  /**
+   * Revisa los datos antes de calcular. errores: impiden un informe confiable. avisos: se informan pero no bloquean.
+   */
+  function validar(ensayo, curso, hojas) {
+    const errores = [], avisos = [];
+    const letras = 'ABCDE'.slice(0, ensayo.alternativas || 4);
+    const P = ensayo.preguntas || [];
+    if (!P.length) errores.push('El ensayo no tiene preguntas.');
+    const sinClave = P.filter((p) => !p.clave || !letras.includes(p.clave)).map((p) => p.n);
+    if (sinClave.length) errores.push(`Preguntas sin clave válida: ${sinClave.join(', ')}.`);
+    const nums = P.map((p) => p.n), rep = nums.filter((v, i) => nums.indexOf(v) !== i);
+    if (rep.length) errores.push(`Números de pregunta repetidos: ${[...new Set(rep)].join(', ')}.`);
+    const validas = P.filter((p) => !p.piloto);
+    const sinEje = validas.filter((p) => !p.eje).map((p) => p.n), sinHab = validas.filter((p) => !p.habilidad).map((p) => p.n);
+    if (sinEje.length) avisos.push(`${sinEje.length} pregunta${sinEje.length === 1 ? '' : 's'} sin eje (${sinEje.slice(0, 12).join(', ')}${sinEje.length > 12 ? '…' : ''}): quedan como "Sin dato".`);
+    if (sinHab.length) avisos.push(`${sinHab.length} pregunta${sinHab.length === 1 ? '' : 's'} sin habilidad (${sinHab.slice(0, 12).join(', ')}${sinHab.length > 12 ? '…' : ''}).`);
+    if (curso) {
+      const ids = new Set(curso.estudiantes.map((e) => e.id));
+      const ajenas = Object.keys(hojas || {}).filter((id) => !ids.has(id));
+      if (ajenas.length) avisos.push(`${ajenas.length} hoja${ajenas.length === 1 ? '' : 's'} de estudiantes que ya no están en la lista del curso: no se cuentan.`);
+      const nombres = curso.estudiantes.map((e) => String(e.nombre).trim().toLowerCase());
+      const dup = curso.estudiantes.filter((e, i) => nombres.indexOf(nombres[i]) !== i).map((e) => e.nombre);
+      if (dup.length) avisos.push(`Estudiantes repetidos en la lista del curso: ${[...new Set(dup)].join(', ')}.`);
+    }
+    const largo = [], raras = [];
+    Object.entries(hojas || {}).forEach(([id, h]) => {
+      const r = h.respuestas || [];
+      if (r.length !== P.length) largo.push(id);
+      if (r.some((x) => x && !letras.includes(x))) raras.push(id);
+    });
+    const nombre = (id) => { const e = curso && curso.estudiantes.find((x) => x.id === id); return e ? e.nombre : id; };
+    if (largo.length) errores.push(`Hojas con una cantidad de respuestas distinta a la de preguntas (${P.length}): ${largo.slice(0, 6).map(nombre).join(', ')}${largo.length > 6 ? '…' : ''}. Revísalas o vuelve a leerlas.`);
+    if (raras.length) errores.push(`Hojas con marcas que no son alternativas válidas (${letras.split('').join(', ')}): ${raras.slice(0, 6).map(nombre).join(', ')}${raras.length > 6 ? '…' : ''}.`);
+    return { errores, avisos, ok: !errores.length };
+  }
 
   // Nota chilena: lineal hasta la exigencia (nota de aprobación) y lineal desde ahí hasta la máxima
   function nota(logro) {
@@ -163,6 +233,9 @@ const Estad = (() => {
       const distractores = letras.filter((l) => l !== p.clave).map((l) => ({ letra: l, n: cuenta[l] })).sort((a, b) => b.n - a.n);
       return {
         ...p, i, cuenta, total, acierto, omision: total ? cuenta[''] / total : 0,
+        // dificultad = proporción de respuestas correctas (convención clásica: más alto = más fácil)
+        correctas: cuenta[p.clave] || 0, omisiones: cuenta[''] || 0, incorrectas: total - (cuenta[p.clave] || 0) - (cuenta[''] || 0),
+        dificultad: acierto, masElegida: letras.slice().sort((a, b) => cuenta[b] - cuenta[a])[0],
         discriminacion: hechas.length >= 4 ? pSup - pInf : null,
         distractor: distractores[0] && distractores[0].n ? distractores[0] : null,
         critica: !p.piloto && total > 0 && acierto < CRITICA,
@@ -184,6 +257,9 @@ const Estad = (() => {
     };
     const porEje = agrupar('eje');
     const porHabilidad = agrupar('habilidad');
+    // Contenido y OA solo si el ensayo los trae; nunca se inventan
+    const porContenido = validas.some((p) => p.contenido) ? agrupar('contenido').filter((g) => g.nombre !== 'Sin dato') : [];
+    const porOA = validas.some((p) => p.oa) ? agrupar('oa').filter((g) => g.nombre !== 'Sin dato') : [];
 
     // Mapa eje × habilidad
     const matriz = porEje.map((eje) => porHabilidad.map((hab) => {
@@ -201,14 +277,24 @@ const Estad = (() => {
     for (let d = Math.floor(minima); d < maxima; d++) histNotas.push({ desde: d, hasta: d + 1, n: 0 });
     hechas.forEach((x) => { const b = histNotas.find((t) => x.nota >= t.desde && (x.nota < t.hasta || t.hasta >= maxima)); if (b) b.n++; });
 
-    const tramos = TRAMOS.map((t) => ({ ...t, n: hechas.filter((x) => tramoDe(x.logro).id === t.id).length }));
+    const porTramo = tramos().map((t) => ({ ...t, n: hechas.filter((x) => tramoDe(x.logro).id === t.id).length }));
     const estandares = cortesDe(ensayo) ? ESTANDARES.map((s) => ({ ...s, n: hechas.filter((x) => x.estandar.id === s.id).length })) : null;
     const puntajes = tieneTabla(ensayo) ? hechas.map((x) => x.puntaje).filter((v) => v != null) : [];
 
     return {
-      ensayo, curso, n, pilotos, letras, estudiantes, hechas, preguntas, porEje, porHabilidad, matriz, histograma, histNotas, tramos, estandares,
+      ensayo, curso, n, pilotos, letras, estudiantes, hechas, preguntas, porEje, porHabilidad, porContenido, porOA, matriz, histograma, histNotas, tramos: porTramo, estandares,
       resumen: {
         corregidas: hechas.length, total: curso.estudiantes.length,
+        ausentes: curso.estudiantes.length - hechas.length,
+        participacion: curso.estudiantes.length ? hechas.length / curso.estudiantes.length : 0,
+        correctasTotal: hechas.reduce((s, x) => s + x.correctas, 0),
+        incorrectasTotal: hechas.reduce((s, x) => s + x.incorrectas, 0),
+        omitidasTotal: hechas.reduce((s, x) => s + x.omitidas, 0),
+        // Logro agregado: todas las respuestas correctas / todas las respuestas válidas esperadas.
+        // Coincide con el promedio de los logros individuales cuando todos responden el mismo ensayo.
+        logroAgregado: hechas.length ? hechas.reduce((s, x) => s + x.correctas, 0) / (hechas.length * n) : 0,
+        dCorrectas: describir(hechas.map((x) => x.correctas)), dLogro: describir(logros),
+        dPuntaje: tieneTabla(ensayo) ? describir(hechas.map((x) => x.puntaje).filter((v) => v != null)) : null,
         media: media(logros), mediana: mediana(logros), desviacion: desviacion(logros),
         q1: cuantil(logros, 0.25), q3: cuantil(logros, 0.75),
         min: logros.length ? Math.min(...logros) : 0, max: logros.length ? Math.max(...logros) : 0,
@@ -424,9 +510,62 @@ const Estad = (() => {
     };
   }
 
+  /**
+   * Consolida los resultados de un estudiante en varios ensayos.
+   * sel: [{ ens, A }] (A = analizar del ensayo en su curso). ejes: nombres de temáticas a incluir (null = todas).
+   * Se agrupa por instrumento (asignatura): PAES M1 y M2, por ejemplo, nunca se mezclan.
+   * Logro consolidado = suma de correctas / suma de preguntas válidas (no se promedian porcentajes).
+   * Cada ensayo cuenta una sola vez aunque venga repetido.
+   */
+  function consolidar(idEst, sel, ejes) {
+    const vistos = new Set(), grupos = new Map();
+    sel.forEach(({ ens, A }) => {
+      if (vistos.has(ens.id)) return;
+      vistos.add(ens.id);
+      const x = A.estudiantes.find((y) => y.e.id === idEst);
+      if (!x || !x.corregida) return;
+      const incl = A.preguntas.filter((p) => !p.piloto && (!ejes || ejes.includes(p.eje || 'Sin dato')));
+      if (!incl.length) return;
+      const k = grupoEnsayo(ens);
+      if (!grupos.has(k)) grupos.set(k, { nombre: k, ensayos: [] });
+      const correctas = incl.filter((p) => x.aciertos[p.i]).length, omisiones = incl.filter((p) => !x.r[p.i]).length;
+      const cursoLogro = media(incl.map((p) => p.acierto));
+      grupos.get(k).ensayos.push({ ens, A, x, preguntas: incl, correctas, omisiones, incorrectas: incl.length - correctas - omisiones, logro: correctas / incl.length, cursoLogro });
+    });
+    return [...grupos.values()].map((g) => {
+      g.ensayos.sort((a, b) => fechaOrden(a.ens).localeCompare(fechaOrden(b.ens)));
+      const suma = (f) => g.ensayos.reduce((s, e) => s + e[f], 0);
+      const preguntas = g.ensayos.reduce((s, e) => s + e.preguntas.length, 0);
+      const juntar = (campo) => {
+        const m = new Map();
+        g.ensayos.forEach((e, j) => e.preguntas.forEach((p) => {
+          const n = p[campo] || 'Sin dato';
+          if (!m.has(n)) m.set(n, { nombre: n, preguntas: 0, correctas: 0, porEnsayo: g.ensayos.map(() => null) });
+          const o = m.get(n); o.preguntas++; if (e.x.aciertos[p.i]) o.correctas++;
+          const pe = o.porEnsayo[j] || (o.porEnsayo[j] = { preguntas: 0, correctas: 0 }); pe.preguntas++; if (e.x.aciertos[p.i]) pe.correctas++;
+        }));
+        return [...m.values()].map((o) => ({ ...o, logro: o.correctas / o.preguntas, serie: o.porEnsayo.map((pe) => (pe ? pe.correctas / pe.preguntas : null)) }))
+          .sort((a, b) => b.logro - a.logro);
+      };
+      const porEje = juntar('eje'), porHabilidad = juntar('habilidad');
+      const recurrente = (lista, f) => lista.filter((o) => { const v = o.serie.filter((z) => z != null); return v.length >= 2 && v.every(f); });
+      const primero = g.ensayos[0], ultimo = g.ensayos[g.ensayos.length - 1];
+      return {
+        ...g, cantidad: g.ensayos.length, preguntas, correctas: suma('correctas'), incorrectas: suma('incorrectas'), omisiones: suma('omisiones'),
+        logro: preguntas ? suma('correctas') / preguntas : 0,
+        porEje, porHabilidad,
+        fortalezas: recurrente(porEje.filter((o) => o.nombre !== 'Sin dato'), (v) => v >= 0.7),
+        persistentes: recurrente(porEje.filter((o) => o.nombre !== 'Sin dato'), (v) => v < 0.5),
+        cambio: g.ensayos.length >= 2 ? ultimo.logro - primero.logro : null,
+        // Cambio relativo al curso: descuenta en parte la diferencia de dificultad entre ensayos
+        cambioRelativo: g.ensayos.length >= 2 ? (ultimo.logro - ultimo.cursoLogro) - (primero.logro - primero.cursoLogro) : null,
+      };
+    });
+  }
+
   return {
     TABLAS_PAES, tablaParaAsignatura, puntuables, contar,
-    TRAMOS, ESTANDARES, CRITICA, BRECHA, POR_DEFECTO, configurar, get conf() { return conf; },
+    TRAMOS, tramos, describir, validar, consolidar, ESTANDARES, CRITICA, BRECHA, POR_DEFECTO, configurar, get conf() { return conf; },
     analizar, perfil, tecnico, confiabilidad, calidadPregunta, historial, nivel, historialNivel, alertas, grupos,
     tramoDe, nota, notaTexto, cortesDe, estandarDe, tieneTabla, puntajeDe, nivelDe, grupoEnsayo, fechaOrden, media,
   };

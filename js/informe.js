@@ -11,7 +11,7 @@ const Informe = (() => {
     grid: '#E3E7EE', pista: '#ECEEF2', gris: '#A9B1BF', t1: '#9ec5f4', t2: '#2a78d6', t3: '#104281',
     cat: ['#2a78d6', '#1baf7a', '#6250d6', '#eda100', '#e87ba4'],
   };
-  const ANCHO = 215.9, ALTO = 279.4, M = 18, W = ANCHO - 2 * M, PIE = 14;
+  const ANCHO = 210, ALTO = 297, M = 18, W = ANCHO - 2 * M, PIE = 14;
 
   const pct = (x) => Math.round(x * 100) + '%';
   const pts = (d) => Math.abs(Math.round(d * 100)) + (Math.abs(Math.round(d * 100)) === 1 ? ' punto' : ' puntos');
@@ -26,9 +26,9 @@ const Informe = (() => {
 
   // ---------- Página y cursor ----------
   function nuevoDoc(ctx) {
-    const doc = new jspdf.jsPDF({ unit: 'mm', format: 'letter', compress: true });
+    const doc = new jspdf.jsPDF({ unit: 'mm', format: 'a4', compress: true });
     const col = ctx.colegio || {};
-    const pie = [col.nombre || 'Lector óptico', ctx.ens.nombre, ctx.cur.nombre].join(' · ');
+    const pie = [col.nombre || 'Lector óptico', ctx.ens && ctx.ens.nombre, ctx.cur && ctx.cur.nombre].filter(Boolean).join(' · ');
     const P = { doc, y: M, pie, colegio: col };
     P.cabe = (alto) => { if (P.y + alto > ALTO - M - PIE) { doc.addPage(); P.y = M; return false; } return true; };
     return P;
@@ -229,26 +229,26 @@ const Informe = (() => {
   }
 
   // Tabla simple con encabezado que se repite en cada página
-  function tabla(P, cols, filas) {
-    const { doc } = P, lh = 6.4;
+  function tabla(P, cols, filas, { tam = 8.8 } = {}) {
+    const { doc } = P, lh = tam >= 8.5 ? 6.4 : 5.6;
     const encabezado = () => {
       doc.setFillColor(C.suave); doc.rect(M, P.y, W, lh, 'F');
-      fuente(doc, 8.5, 'bold', C.texto2);
+      fuente(doc, Math.min(8.5, tam), 'bold', C.texto2);
       let x = M;
       cols.forEach((c) => { doc.text(c.titulo, c.der ? x + c.ancho - 2 : x + 2, P.y + lh * 0.68, { align: c.der ? 'right' : 'left' }); x += c.ancho; });
       P.y += lh;
     };
     P.cabe(lh * 6); encabezado();
-    const ll = 4.1;   // alto de cada línea extra en celdas que se envuelven
+    const ll = tam * 0.47;   // alto de cada línea extra en celdas que se envuelven
     filas.forEach((f, i) => {
       const negrita = (c, k) => (c.negrita != null ? c.negrita : k === 1);
-      const textos = cols.map((c, k) => { fuente(doc, 8.8, negrita(c, k) ? 'bold' : 'normal'); const t = doc.splitTextToSize(String(f.celdas[k] == null ? '' : f.celdas[k]), c.ancho - 3); return c.envolver ? t : [t[0] || '']; });
+      const textos = cols.map((c, k) => { fuente(doc, tam, negrita(c, k) ? 'bold' : 'normal'); const t = doc.splitTextToSize(String(f.celdas[k] == null ? '' : f.celdas[k]), c.ancho - 3); return c.envolver ? t : [t[0] || '']; });
       const alto = lh + (Math.max(...textos.map((t) => t.length)) - 1) * ll;
       if (!P.cabe(alto)) encabezado();
       if (f.resaltar) { doc.setFillColor('#FBE3D6'); doc.rect(M, P.y, W, alto, 'F'); } else if (i % 2) { doc.setFillColor('#F7F8FB'); doc.rect(M, P.y, W, alto, 'F'); }
       let x = M;
       cols.forEach((c, k) => {
-        fuente(doc, 8.8, negrita(c, k) ? 'bold' : 'normal');
+        fuente(doc, tam, negrita(c, k) ? 'bold' : 'normal');
         textos[k].forEach((v, j) => doc.text(v, c.der ? x + c.ancho - 2 : x + 2, P.y + lh * 0.68 + j * ll, { align: c.der ? 'right' : 'left' }));
         x += c.ancho;
       });
@@ -693,8 +693,13 @@ const Informe = (() => {
 
   function cuerpoCurso(P, ctx) {
     const { ens, cur, A, H, AL, G, N, HN } = ctx, R = A.resumen;
-    banda(P, 'Informe de resultados', `${ens.nombre} · ${cur.nombre}`, [ens.fecha, `${R.corregidas} de ${R.total} hojas corregidas`, `generado el ${new Date().toLocaleDateString('es-CL')}`].filter(Boolean).join(' · '));
-    titulo(P, 'Lo principal', 0);
+    banda(P, 'Informe para el docente', `${ens.nombre} · ${cur.nombre}`, [tipoEvaluacion(ens), ens.fecha, `generado el ${hoy()}`].filter(Boolean).join(' · '));
+    titulo(P, 'Identificación del curso', 0, 40);
+    ficha(P, [['Curso', cur.nombre], ['Asignatura', ens.asignatura || '–'], ['Evaluación aplicada', `${ens.nombre} (${tipoEvaluacion(ens)})`], ['Fecha', ens.fecha || 'sin fecha registrada'],
+      ['Estudiantes evaluados', `${R.corregidas} de ${R.total}`], ['Participación', pct1(R.participacion)]]);
+    avisoDatos(P, ctx.validacion);
+    if (ctx.validacion && !ctx.validacion.ok) { parrafo(P, 'Hay problemas en los datos que afectan los cálculos. Corrígelos y vuelve a generar el informe: no se muestran estadísticas para no entregar cifras engañosas.', { estilo: 'bold', color: C.critico }); return; }
+    titulo(P, 'Lo principal', 4);
     vinetas(P, lineasPrincipales(ctx));
     const tarjetas = [
       { etiqueta: 'Logro promedio', valor: pct(R.media), detalle: `mediana ${pct(R.mediana)}` },
@@ -709,6 +714,9 @@ const Informe = (() => {
     seccion(P, 1, 'El curso en general', 92);
     titulo(P, R.puntajeMedia != null ? '¿Cómo se distribuyen los puntajes?' : '¿Cómo se distribuyen las notas?', 0, 70);
     distribucion(P, A);
+    titulo(P, 'Resumen estadístico', 6, 60);
+    tablaIndicadores(P, A);
+    nivelesDesempeno(P, A);
 
     const conPuntaje = R.puntajeMedia != null, pocos = R.corregidas < MIN_N, meta = metaDe(ctx);
     if (!pocos) {
@@ -811,11 +819,16 @@ const Informe = (() => {
 
     // 4. Paralelos y evolución
     const sel = ctx.seleccion || [], conSel = sel.length > 1, conEvol = conSel || (H && H.puntos.length >= 2);
-    if (conNivel || conEvol) seccion(P, 4, 'Paralelos y evolución', 60);
+    let ns = 4;
+    seccion(P, ns++, 'Contenidos, OA y habilidades', 50);
+    contenidosHabilidades(P, A);
+    seccion(P, ns++, 'Análisis pregunta por pregunta', 60);
+    preguntaPorPregunta(P, A);
+    detallePreguntas(P, A);
+    if (conNivel || conEvol) seccion(P, ns++, 'Comparación entre cursos y evolución', 60);
     if (conNivel) {
-      titulo(P, `Comparación con los paralelos de ${ctx.nivel}`, 0, 40);
-      const filas = N.porCurso.map((x) => ({ nombre: x.curso.nombre, valor: x.A.resumen.media, color: C.cat[x.idx] || C.gris, destacado: x.curso.id === cur.id, ref: N.A.resumen.media }));
-      barras(P, filas, { refNombre: `Raya negra: promedio de ${ctx.nivel} (${pct(N.A.resumen.media)})`, etiquetaAncho: 30 });
+      titulo(P, `Comparación con otros cursos de ${ctx.nivel}`, 0, 40);
+      compararCursos(P, N.porCurso, N.A, { propio: cur.id, nombreInst: ctx.nivel });
       const ord = N.porCurso.slice().sort((a, b) => b.A.resumen.media - a.A.resumen.media);
       const lugar = ord.findIndex((x) => x.curso.id === cur.id) + 1;
       let t = `${cur.nombre} quedó en el lugar ${lugar} de ${ord.length} paralelos. La diferencia entre el mejor y el más bajo es de ${pts(ord[0].A.resumen.media - ord[ord.length - 1].A.resumen.media)}.`;
@@ -837,7 +850,7 @@ const Informe = (() => {
     }
 
     // 5. Apoyo y sugerencias
-    seccion(P, conNivel || conEvol ? 5 : 4, 'Apoyo y trabajo en clases', 50);
+    seccion(P, ns++, 'Diagnóstico, apoyo y plan de trabajo', 50);
     const conAlerta = AL.filter((a) => a.alertas.length).sort((a, b) => b.gravedad - a.gravedad || a.x.logro - b.x.logro);
     titulo(P, 'Estudiantes que requieren apoyo', 0, 30);
     if (conAlerta.length) {
@@ -855,6 +868,7 @@ const Informe = (() => {
     const resp = (ctx.colegio && ctx.colegio.responsable) || 'Docente de la asignatura';
     tabla(P, [{ titulo: 'Acción', ancho: W - 82, envolver: true }, { titulo: 'Responsable', ancho: 46, envolver: true }, { titulo: 'Plazo', ancho: 36, envolver: true }],
       sugerencias(ctx).map((t, i) => ({ celdas: [t, resp, plazos[i] || 'Este mes'] })));
+    planIntervencion(P, ctx);
 
     titulo(P, 'Resultados por estudiante', 6, 50);
     const conEst = !!A.estandares;
@@ -869,6 +883,8 @@ const Informe = (() => {
     })));
     if (sinHoja.length > 3) parrafo(P, `Sin hoja corregida (${sinHoja.length}): ${lista(sinHoja.map((x) => `${x.e.lista}. ${nombreCorto(x.e.nombre)}`))}.`, { tam: 9 });
     parrafo(P, `${pocos ? '' : 'El percentil indica qué porcentaje del curso obtuvo un resultado menor.'}${conPuntaje ? ' El puntaje se estima con la tabla de conversión del ensayo.' : conEst ? ' El estándar se estima con los cortes del ensayo.' : ''}`, { color: C.texto2, tam: 8.5 });
+    tablaIndividual(P, ctx);
+    notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!A.estandares });
   }
 
   // ---------- Varios ensayos ----------
@@ -963,7 +979,7 @@ const Informe = (() => {
     const sel = ctx.seleccion, grupos = porAsignatura(sel);
     const filas = sel.map((s) => ({ s, y: s.A.estudiantes.find((z) => z.e.id === x.e.id) }));
     titulo(P, 'Sus resultados en los ensayos seleccionados', 4, 40);
-    tabla(P, [{ titulo: 'Ensayo', ancho: 70, envolver: true, negrita: true }, { titulo: 'Fecha', ancho: 20, negrita: false }, { titulo: 'Correctas', ancho: 20, der: true }, { titulo: 'Logro', ancho: 16, der: true }, { titulo: 'Nota', ancho: 14, der: true }, { titulo: 'Puntaje / nivel', ancho: 22, der: true }, { titulo: 'vs. curso', ancho: W - 162, der: true }],
+    tabla(P, [{ titulo: 'Ensayo', ancho: 62, envolver: true, negrita: true }, { titulo: 'Fecha', ancho: 20, negrita: false }, { titulo: 'Correctas', ancho: 20, der: true }, { titulo: 'Logro', ancho: 16, der: true }, { titulo: 'Nota', ancho: 14, der: true }, { titulo: 'Puntaje / nivel', ancho: 22, der: true }, { titulo: 'vs. curso', ancho: W - 154, der: true }],
       filas.map(({ s, y }) => ({ celdas: y && y.corregida ? [s.ens.nombre, s.ens.fecha || '', `${y.correctas}/${s.A.n}`, pct(y.logro), nt(y.nota), conversionDe(y) || '–', `${y.logro - s.A.resumen.media >= 0 ? '+' : ''}${Math.round((y.logro - s.A.resumen.media) * 100)}`]
         : [s.ens.nombre, s.ens.fecha || '', 'no rindió', '', '', '', ''] })));
     const unGrupo = grupos.length === 1;
@@ -1224,5 +1240,529 @@ const Informe = (() => {
     return P.doc.output('blob');
   }
 
-  return { curso, estudiantes, estudiante };
+  // =====================================================================
+  // Sistema de informes: piezas comunes, directivo, docente ampliado, estudiante y apoderados
+  // =====================================================================
+  const dec1 = (v) => (v == null ? '–' : (Math.round(v * 10) / 10).toFixed(1).replace('.', ','));
+  const dec2 = (v) => (v == null ? '–' : (Math.round(v * 100) / 100).toFixed(2).replace('.', ','));
+  const pct1 = (x) => (x == null ? '–' : (Math.round(x * 1000) / 10).toFixed(1).replace('.', ',') + '%');
+  const pp = (d) => (d == null ? '–' : `${Math.round(d * 100) > 0 ? '+' : Math.round(d * 100) < 0 ? '-' : ''}${Math.abs(Math.round(d * 100))} pp`);
+  const hoy = () => new Date().toLocaleDateString('es-CL');
+  const tipoEvaluacion = (ens) => {
+    const a = Temarios.norm(ens.asignatura || '');
+    if (/m2|matematica 2/.test(a)) return 'PAES M2';
+    if (ens.tipo === 'PAES' && /matematica|m1/.test(a)) return 'PAES M1';
+    if (ens.asignatura && ens.tipo && Temarios.norm(ens.asignatura).startsWith(Temarios.norm(ens.tipo))) return ens.asignatura;
+    return [ens.tipo, ens.asignatura].filter(Boolean).join(' · ') || 'Ensayo';
+  };
+  const conDatos = (gs) => gs.filter((g) => g.nombre !== 'Sin dato');
+  const estadoLogro = (v) => { const n = Estad.conf.niveles; return v >= n.alto ? 'Consolidado' : v >= n.medio ? 'En desarrollo' : 'Crítico'; };
+
+  // Tabla de dos columnas (dato y valor); omite las filas sin valor
+  function ficha(P, filas, anchoDato = 64) {
+    tabla(P, [{ titulo: 'Dato', ancho: anchoDato, negrita: true, envolver: true }, { titulo: 'Valor', ancho: W - anchoDato, envolver: true, negrita: false }],
+      filas.filter((f) => f[1] != null && f[1] !== '').map((f) => ({ celdas: f })));
+  }
+
+  function avisoDatos(P, val) {
+    if (!val || (!val.errores.length && !val.avisos.length)) return;
+    titulo(P, val.errores.length ? 'Problemas en los datos (revisar antes de usar el informe)' : 'Observaciones sobre los datos', 2, 20);
+    vinetas(P, [...val.errores, ...val.avisos], { tam: 9.5 });
+  }
+
+  // Indicadores estadísticos generales de un análisis
+  function tablaIndicadores(P, A) {
+    const R = A.resumen, dC = R.dCorrectas, dL = R.dLogro, n = A.n, esperadas = R.corregidas * n;
+    const filas = [
+      ['Estudiantes evaluados', `${R.corregidas} de ${R.total} en la lista (${pct1(R.participacion)} de participación); ${R.ausentes} sin hoja`],
+      ['Preguntas válidas', `${n}${A.pilotos ? ` (además, ${plural(A.pilotos, 'pregunta piloto que no cuenta', 'preguntas piloto que no cuentan')})` : ''}`],
+      ['Promedio de respuestas correctas', `${dec1(dC.media)} de ${n}`],
+      ['Promedio de los logros individuales', pct1(dL.media)],
+      ['Logro agregado', `${pct1(R.logroAgregado)}: ${R.correctasTotal} respuestas correctas de ${esperadas} esperadas`],
+      ['Mediana', `${dec1(dC.mediana)} correctas (${pct1(dL.mediana)})`],
+      ['Moda', dC.moda.length ? (dC.moda.length > 3 ? 'varios valores empatados' : `${lista(dC.moda.map(String))} correctas`) : 'no hay: ningún valor se repite'],
+      ['Desviación estándar (muestral)', `${dec1(dC.desviacion)} correctas (${dec1(dL.desviacion * 100)} pp de logro)`],
+      ['Varianza (muestral)', `${dec2(dC.varianza)} (correctas al cuadrado)`],
+      ['Mínimo y máximo', `${dC.min} y ${dC.max} correctas (${pct(dL.min)} y ${pct(dL.max)})`],
+      ['Cuartiles Q1 y Q3', `${dec1(dC.q1)} y ${dec1(dC.q3)} correctas (${pct(dL.q1)} y ${pct(dL.q3)})`],
+      ['Rango intercuartílico', `${dec1(dC.iqr)} correctas (${dec1(dL.iqr * 100)} pp)`],
+      ['Respuestas correctas, incorrectas y omitidas', `${R.correctasTotal}, ${R.incorrectasTotal} y ${R.omitidasTotal} (las omitidas son el ${pct1(esperadas ? R.omitidasTotal / esperadas : 0)} del total)`],
+    ];
+    if (R.dPuntaje && R.dPuntaje.n) filas.push(['Puntaje PAES estimado', `promedio ${Math.round(R.dPuntaje.media)}, mediana ${Math.round(R.dPuntaje.mediana)}, mínimo ${R.dPuntaje.min} y máximo ${R.dPuntaje.max}. Es una estimación con la tabla de conversión del ensayo, no un puntaje oficial`]);
+    ficha(P, filas, 70);
+  }
+
+  // Estudiantes por nivel de desempeño (cortes de Ajustes) y por estándar SIMCE si el ensayo trae cortes
+  function nivelesDesempeno(P, A, filasExtra = []) {
+    const R = A.resumen;
+    titulo(P, 'Distribución por niveles de desempeño', 4, 45);
+    barras(P, A.tramos.map((t, k) => ({ nombre: `${t.nombre} (${t.texto})`, valor: R.corregidas ? t.n / R.corregidas : 0, color: [C.critico, C.serie, C.t3][k] })),
+      { formato: (v) => `${pct(v)} (${Math.round(v * R.corregidas)})`, etiquetaAncho: 54 });
+    filasExtra.forEach((f) => f());
+    parrafo(P, `Niveles por porcentaje de logro, con los cortes definidos en Ajustes (${pct(Estad.conf.niveles.medio)} y ${pct(Estad.conf.niveles.alto)}). No son los niveles oficiales de PAES ni de SIMCE.`, { color: C.texto2, tam: 9 });
+  }
+
+  // Barras agrupadas: una fila por categoría y una barra por curso
+  function barrasAgrupadas(P, cats, series) {
+    const { doc } = P, et = 54, x0 = M + et, largo = W - et - 14, h = 3.4, g = 0.9;
+    P.cabe(14 + Math.min(3, cats.length) * (series.length * (h + g) + 4));
+    leyenda(P, series.map((s) => ({ nombre: s.nombre, color: s.color })));
+    cats.forEach((c) => {
+      const alto = series.length * (h + g) + 3.5;
+      P.cabe(alto);
+      fuente(doc, 8.8, 'bold');
+      const et2 = doc.splitTextToSize(c.nombre, et - 4);
+      et2.slice(0, 2).forEach((l, j) => doc.text(l, x0 - 3, P.y + 3 + j * 3.6, { align: 'right' }));
+      series.forEach((s, k) => {
+        const v = c.valores[k], y = P.y + k * (h + g);
+        doc.setFillColor(C.pista); doc.rect(x0, y, largo, h, 'F');
+        if (v != null) {
+          if (v > 0) { doc.setFillColor(s.color); doc.rect(x0, y, Math.max(0.4, Math.min(1, v) * largo), h, 'F'); }
+          fuente(doc, 7.5, 'normal', C.texto2); doc.text(pct(v), x0 + largo + 1.5, y + h * 0.82);
+        }
+      });
+      P.y += alto;
+    });
+    P.y += 2;
+  }
+
+  // Comparación entre cursos que rindieron el mismo ensayo
+  function compararCursos(P, porCurso, inst, { propio = null, nombreInst = 'Total' } = {}) {
+    const R = inst.resumen, colores = porCurso.map((x, k) => C.cat[k % C.cat.length]);
+    titulo(P, 'Tabla comparativa de cursos', 2, 50);
+    tabla(P, [{ titulo: 'Curso', ancho: 24, negrita: true }, { titulo: 'Evaluados', ancho: 20, der: true }, { titulo: 'Particip.', ancho: 17, der: true },
+      { titulo: 'Promedio', ancho: 18, der: true }, { titulo: 'Mediana', ancho: 17, der: true }, { titulo: 'Desv. est.', ancho: 19, der: true },
+      { titulo: 'Bajo · Medio · Alto', ancho: 36, der: true }, { titulo: 'Dif. con total', ancho: W - 151, der: true }],
+    [...porCurso.map((x) => {
+      const r = x.A.resumen, t = x.A.tramos;
+      return { resaltar: x.curso.id === propio, celdas: [x.curso.nombre, `${r.corregidas}/${r.total}`, pct(r.participacion), pct1(r.media), pct1(r.mediana), `${dec1(r.desviacion * 100)} pp`, t.map((z) => z.n).join(' · '), pp(r.media - R.media)] };
+    }), { celdas: [nombreInst, `${R.corregidas}/${R.total}`, pct(R.participacion), pct1(R.media), pct1(R.mediana), `${dec1(R.desviacion * 100)} pp`, inst.tramos.map((z) => z.n).join(' · '), '–'] }]);
+    parrafo(P, `Promedio y mediana son de los logros individuales. "Bajo · Medio · Alto" es la cantidad de estudiantes en cada nivel de desempeño. pp = puntos porcentuales.${propio ? ' La fila destacada es su curso.' : ''}`, { color: C.texto2, tam: 8.5 });
+    titulo(P, 'Rendimiento global por curso', 4, porCurso.length * 11 + 14);
+    barras(P, porCurso.map((x, k) => ({ nombre: x.curso.nombre, valor: x.A.resumen.media, color: colores[k], ref: R.media, destacado: x.curso.id === propio })),
+      { refNombre: `Raya negra: ${nombreInst} (${pct(R.media)})`, etiquetaAncho: 30 });
+    const series = porCurso.map((x, k) => ({ nombre: x.curso.nombre, color: colores[k] }));
+    const bloque = (nombre, campo, conGrafico = true) => {
+      const nombres = conDatos(inst[campo]).sort((a, b) => b.logro - a.logro).map((g) => g.nombre);
+      if (!nombres.length) return;
+      const filas = nombres.map((n) => {
+        const vals = porCurso.map((x) => { const g = x.A[campo].find((y) => y.nombre === n); return g ? g.logro : null; });
+        const hay = vals.filter((v) => v != null), tot = inst[campo].find((y) => y.nombre === n);
+        return { nombre: n, vals, total: tot ? tot.logro : null, preguntas: tot ? tot.preguntas : 0, brecha: hay.length >= 2 ? Math.max(...hay) - Math.min(...hay) : null };
+      });
+      titulo(P, `${nombre} por curso`, 5, 40);
+      const k = porCurso.length, ancho = Math.min(19, (W - 70 - 20 - 18) / k);
+      tabla(P, [{ titulo: nombre.split(' ')[0], ancho: W - ancho * k - 38 - 12, envolver: true, negrita: true }, { titulo: 'Preg.', ancho: 12, der: true },
+        ...porCurso.map((x) => ({ titulo: x.curso.nombre, ancho, der: true, negrita: false })), { titulo: 'Total', ancho: 18, der: true, negrita: false }, { titulo: 'Brecha', ancho: 20, der: true, negrita: false }],
+      filas.map((f) => ({ resaltar: f.brecha != null && f.brecha >= 2 * Estad.conf.institucional.brechaCurso, celdas: [f.nombre, f.preguntas, ...f.vals.map((v) => (v == null ? '–' : pct(v))), f.total == null ? '–' : pct(f.total), f.brecha == null ? '–' : `${Math.round(f.brecha * 100)} pp`] })));
+      if (conGrafico && filas.length <= 12 && k >= 2) barrasAgrupadas(P, filas.map((f) => ({ nombre: f.nombre, valores: f.vals })), series);
+    };
+    bloque('Ejes temáticos', 'porEje');
+    bloque('Habilidades', 'porHabilidad');
+    if (inst.porContenido.length) bloque('Contenidos', 'porContenido', inst.porContenido.length <= 10);
+    if (inst.porOA.length) bloque('OA', 'porOA', inst.porOA.length <= 10);
+    parrafo(P, `Brecha: diferencia entre el curso con mayor y menor logro, en puntos porcentuales. Se destacan las brechas de ${Math.round(2 * Estad.conf.institucional.brechaCurso * 100)} pp o más. Todos los cursos rindieron el mismo ensayo; las diferencias son descriptivas y no se aplicó una prueba estadística.`, { color: C.texto2, tam: 8.5 });
+  }
+
+  function alertasInstitucionales(porCurso, inst) {
+    const u = Estad.conf.institucional, R = inst.resumen, out = [];
+    porCurso.forEach((x) => {
+      const r = x.A.resumen, d = r.media - R.media;
+      if (porCurso.length >= 2 && d <= -u.brechaCurso) out.push(`${x.curso.nombre} está ${pts(d)} bajo el promedio del conjunto (${pct(r.media)} frente a ${pct(R.media)}).`);
+      if (r.participacion < u.participacion) out.push(`Participación baja en ${x.curso.nombre}: ${r.corregidas} de ${r.total} estudiantes (${pct(r.participacion)}).`);
+      if (r.corregidas >= MIN_N && r.desviacion >= u.dispersion) out.push(`Resultados muy dispersos en ${x.curso.nombre}: desviación estándar de ${dec1(r.desviacion * 100)} pp de logro.`);
+      const bajo = r.corregidas ? x.A.tramos[0].n / r.corregidas : 0;
+      if (bajo >= u.concentracionBaja) out.push(`${pct(bajo)} de ${x.curso.nombre} quedó en el nivel Bajo (${x.A.tramos[0].texto} de logro).`);
+    });
+    conDatos(inst.porEje).filter((g) => g.logro < u.ejeBajo).sort((a, b) => a.logro - b.logro).forEach((g) => out.push(`Eje con bajo logro en el conjunto: ${g.nombre} (${pct(g.logro)}).`));
+    if (porCurso.length >= 2) conDatos(inst.porEje).forEach((g) => {
+      const v = porCurso.map((x) => { const e = x.A.porEje.find((y) => y.nombre === g.nombre); return e ? { c: x.curso.nombre, v: e.logro } : null; }).filter(Boolean).sort((a, b) => b.v - a.v);
+      if (v.length >= 2 && v[0].v - v[v.length - 1].v >= 2 * u.brechaCurso) out.push(`Diferencia relevante en ${g.nombre}: ${Math.round((v[0].v - v[v.length - 1].v) * 100)} pp entre ${v[0].c} (${pct(v[0].v)}) y ${v[v.length - 1].c} (${pct(v[v.length - 1].v)}).`);
+    });
+    return out;
+  }
+
+  function notaMetodologica(P, { consolidado = false, tieneTabla = false, tieneCortes = false } = {}) {
+    titulo(P, 'Nota metodológica', 6, 40);
+    const n = Estad.conf.niveles;
+    const items = [
+      'Logro: respuestas correctas divididas por las preguntas válidas. Las preguntas piloto no cuentan. Las respuestas en blanco cuentan como no logradas, pero se informan aparte de las incorrectas.',
+      'Promedio de los logros individuales: el promedio de los porcentajes de cada estudiante. Logro agregado: todas las respuestas correctas del grupo divididas por todas las respuestas esperadas. Con un mismo ensayo ambos coinciden; se informan por separado para no confundirlos.',
+      'Desviación estándar y varianza son muestrales (dividen por n - 1). Los cuartiles se calculan por interpolación lineal, igual que CUARTIL.INC de Excel. La moda se informa solo si algún valor se repite.',
+      `Niveles de desempeño: Bajo bajo ${pct(n.medio)}, Medio desde ${pct(n.medio)} y Alto desde ${pct(n.alto)} de logro. Son cortes configurables en Ajustes y no corresponden a los niveles oficiales de PAES ni de SIMCE.`,
+      tieneTabla ? 'Puntaje PAES estimado: se obtiene con la tabla de conversión (correctas → puntaje) cargada en el ensayo. No es el puntaje oficial del DEMRE.' : 'Este informe no estima puntajes PAES: el ensayo no tiene tabla de conversión cargada y la app no convierte porcentajes en puntajes por reglas arbitrarias.',
+      tieneCortes ? 'Estándares SIMCE estimados: se asignan con los cortes de logro que trae el ensayo. No es el puntaje SIMCE ni el estándar oficial de la Agencia de Calidad.' : null,
+      'Comparaciones entre cursos: solo entre cursos que rindieron el mismo ensayo. Las diferencias se expresan en puntos porcentuales (pp) y son descriptivas: no se aplicaron pruebas estadísticas. Con menos de 8 estudiantes los resultados son referenciales.',
+      'Distractores: la explicación de un error aparece como hipótesis, salvo que el ensayo traiga el error asociado a cada alternativa.',
+      consolidado ? 'Resultados acumulados: el logro global es la suma de respuestas correctas dividida por la suma de preguntas válidas de los ensayos elegidos (no es el promedio de los porcentajes). Cada ensayo se cuenta una vez. Los instrumentos distintos (por ejemplo, PAES M1 y M2) se informan por separado. Una diferencia entre ensayos puede deberse en parte a su distinta dificultad.' : null,
+    ].filter(Boolean);
+    vinetas(P, items, { tam: 8.8 });
+  }
+
+  // ---------- 1. Resumen para equipo directivo ----------
+  // ctxD: { ens, nivel, porCurso: [{ curso, A }], inst: análisis conjunto, colegio, validacion }
+  function seccionDirectivo(P, ctxD) {
+    const { ens, porCurso, inst } = ctxD, R = inst.resumen;
+    banda(P, 'Resumen para equipo directivo', `${ens.nombre} · ${ctxD.nivel || 'Cursos seleccionados'}`, [tipoEvaluacion(ens), ens.fecha, `generado el ${hoy()}`].filter(Boolean).join(' · '));
+    titulo(P, 'Información general', 0, 50);
+    ficha(P, [
+      ['Establecimiento', (ctxD.colegio || {}).nombre || 'Sin nombre (se define en Ajustes)'],
+      ['Asignatura', ens.asignatura || '–'],
+      ['Nivel', ctxD.nivel || '–'],
+      ['Tipo de evaluación', tipoEvaluacion(ens)],
+      ['Fecha de aplicación', ens.fecha || 'sin fecha registrada'],
+      ['Cursos participantes', `${porCurso.length}: ${lista(porCurso.map((x) => x.curso.nombre))}`],
+      ['Estudiantes en las listas', String(R.total)],
+      ['Estudiantes evaluados', String(R.corregidas)],
+      ['Estudiantes ausentes (sin hoja)', String(R.ausentes)],
+      ['Participación', pct1(R.participacion)],
+    ]);
+    avisoDatos(P, ctxD.validacion);
+    if (ctxD.validacion && !ctxD.validacion.ok) {
+      parrafo(P, 'Hay problemas en los datos que afectan los cálculos. Corrígelos y vuelve a generar el informe: no se muestran estadísticas para no entregar cifras engañosas.', { estilo: 'bold', color: C.critico });
+      return;
+    }
+    seccion(P, 1, 'Indicadores generales', 90);
+    tablaIndicadores(P, inst);
+    nivelesDesempeno(P, inst, inst.estandares ? [() => {
+      titulo(P, 'Estándares de aprendizaje SIMCE (estimados)', 3, 40);
+      apiladas(P, [...porCurso.map((x) => ({ nombre: x.curso.nombre, partes: x.A.estandares.map((s) => s.n) })), { nombre: 'Total', partes: inst.estandares.map((s) => s.n), destacado: true }], Estad.ESTANDARES.map((s) => s.nombre));
+    }] : []);
+    if (porCurso.length >= 2) { seccion(P, 2, 'Comparación entre cursos', 70); compararCursos(P, porCurso, inst, { nombreInst: 'Total' }); }
+    // Ejes: dominio de contenidos
+    seccion(P, porCurso.length >= 2 ? 3 : 2, 'Ejes temáticos y habilidades', 60);
+    const ejes = conDatos(inst.porEje).sort((a, b) => b.logro - a.logro), habs = conDatos(inst.porHabilidad).sort((a, b) => b.logro - a.logro);
+    if (ejes.length) { titulo(P, 'Logro por eje temático', 0, ejes.length * 11 + 10); barras(P, ejes.map((g) => ({ nombre: g.nombre, valor: g.logro, color: g.logro < Estad.conf.institucional.ejeBajo ? C.critico : C.serie }))); }
+    if (inst.porContenido.length >= 2) {
+      const c = inst.porContenido.slice().sort((a, b) => b.logro - a.logro), k = Math.min(5, Math.floor(c.length / 2));
+      titulo(P, 'Contenidos con mayor y menor dominio', 4, 40);
+      tabla(P, [{ titulo: 'Mayor dominio', ancho: W / 2 - 14, envolver: true, negrita: false }, { titulo: '%', ancho: 14, der: true }, { titulo: 'Menor dominio', ancho: W / 2 - 14, envolver: true, negrita: false }, { titulo: '%', ancho: 14, der: true }],
+        Array.from({ length: k }, (_, i) => ({ celdas: [c[i].nombre, pct(c[i].logro), c[c.length - 1 - i].nombre, pct(c[c.length - 1 - i].logro)] })));
+    } else parrafo(P, 'El ensayo no trae el contenido específico de cada pregunta, así que el análisis llega hasta el eje temático. Para ver contenidos, complétalos en la columna E de la plantilla.', { color: C.texto2, tam: 9 });
+    if (habs.length) { titulo(P, 'Logro por habilidad', 5, habs.length * 11 + 10); barras(P, habs.map((g) => ({ nombre: g.nombre, valor: g.logro, color: g.logro < 0.5 ? C.critico : C.serie }))); }
+    // Alertas
+    const al = alertasInstitucionales(porCurso, inst), u = Estad.conf.institucional;
+    seccion(P, porCurso.length >= 2 ? 4 : 3, 'Alertas institucionales', 40);
+    vinetas(P, al.length ? al : ['No se activó ninguna alerta con los criterios actuales.'], { tam: 10 });
+    parrafo(P, `Criterios (se cambian en Ajustes): curso ${Math.round(u.brechaCurso * 100)} pp o más bajo el promedio; eje bajo ${pct(u.ejeBajo)}; diferencia entre cursos en un eje de ${Math.round(2 * u.brechaCurso * 100)} pp o más; participación bajo ${pct(u.participacion)}; desviación estándar de ${Math.round(u.dispersion * 100)} pp o más; ${pct(u.concentracionBaja)} o más del curso en el nivel Bajo.`, { color: C.texto2, tam: 8.5 });
+    // Conclusiones
+    seccion(P, porCurso.length >= 2 ? 5 : 4, 'Conclusiones y recomendaciones', 60);
+    const fuertes = [...ejes.filter((g) => g.logro >= 0.7).map((g) => `${g.nombre} (${pct(g.logro)})`), ...habs.filter((g) => g.logro >= 0.7).map((g) => `la habilidad ${minus(g.nombre)} (${pct(g.logro)})`)];
+    const debiles = [...ejes.filter((g) => g.logro < 0.5).map((g) => `${g.nombre} (${pct(g.logro)})`), ...habs.filter((g) => g.logro < 0.5).map((g) => `la habilidad ${minus(g.nombre)} (${pct(g.logro)})`)];
+    const conc = [];
+    conc.push(`Resultado global: ${pct1(R.media)} de logro promedio con ${R.corregidas} estudiantes evaluados (${pct(R.participacion)} de participación).`);
+    conc.push(fuertes.length ? `Fortalezas: ${lista(fuertes)}.` : ejes.length ? `Ningún eje llega a 70%; el mejor resuelto es ${ejes[0].nombre} (${pct(ejes[0].logro)}).` : 'Sin ejes clasificados.');
+    conc.push(debiles.length ? `Dificultades: ${lista(debiles)}.` : ejes.length ? `Ningún eje queda bajo 50%; el más bajo es ${ejes[ejes.length - 1].nombre} (${pct(ejes[ejes.length - 1].logro)}).` : '');
+    if (porCurso.length >= 2) {
+      const o = porCurso.slice().sort((a, b) => b.A.resumen.media - a.A.resumen.media), d = o[0].A.resumen.media - o[o.length - 1].A.resumen.media;
+      conc.push(d >= u.brechaCurso ? `Brecha entre cursos: ${Math.round(d * 100)} pp entre ${o[0].curso.nombre} (${pct(o[0].A.resumen.media)}) y ${o[o.length - 1].curso.nombre} (${pct(o[o.length - 1].A.resumen.media)}).` : `Los cursos tienen resultados parecidos: ${Math.round(d * 100)} pp entre el mejor y el más bajo.`);
+    }
+    vinetas(P, conc.filter(Boolean), { tam: 10 });
+    titulo(P, 'Prioridades de intervención y recomendaciones para UTP', 4, 40);
+    const rec = [];
+    const e0 = ejes[ejes.length - 1], h0 = habs[habs.length - 1];
+    if (e0 && e0.logro < 0.6) { const te = Temarios.eje(ens.asignatura, e0.nombre); rec.push(`Prioridad 1: ${e0.nombre}. Coordinar entre los docentes del nivel una unidad de refuerzo${te ? ` centrada en ${lista(te.contenidos.slice(0, 3).map(minus))}` : ''} y medir su avance en el próximo ensayo.`); }
+    if (h0 && h0.logro < 0.6) rec.push(`Prioridad ${rec.length + 1}: la habilidad ${minus(h0.nombre)}. Incluirla de forma explícita en las planificaciones de todas las unidades, no solo en la del eje más bajo.`);
+    if (porCurso.length >= 2) {
+      const bajos = porCurso.filter((x) => x.A.resumen.media - R.media <= -u.brechaCurso);
+      if (bajos.length) rec.push(`Acompañar a ${lista(bajos.map((x) => x.curso.nombre))}: revisar con sus docentes la cobertura curricular y las condiciones de aplicación antes de concluir.`);
+      const br = ctxD.brechas || [];
+      if (br.length) rec.push(`Revisar en reunión de departamento las preguntas con 25 pp o más de diferencia entre cursos (${lista(br.slice(0, 6).map((p) => String(p.n)))}): suelen indicar contenidos que no se trabajaron igual.`);
+    }
+    if (porCurso.some((x) => x.A.resumen.participacion < u.participacion)) rec.push('Asegurar la participación en el próximo ensayo: con muchas ausencias los resultados pueden no representar al curso.');
+    rec.push('Repetir la medición con un ensayo equivalente en 6 a 8 semanas para verificar si las acciones tuvieron efecto, comparando los mismos ejes.');
+    vinetas(P, rec, { tam: 10 });
+    notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!inst.estandares });
+  }
+
+  // ---------- Docente: secciones adicionales ----------
+  function contenidosHabilidades(P, A) {
+    const n = Estad.conf.niveles;
+    const estado = (rows) => tabla(P, [{ titulo: 'Nombre', ancho: W - 74, envolver: true, negrita: true }, { titulo: 'Preguntas', ancho: 20, der: true }, { titulo: 'Logro', ancho: 18, der: true }, { titulo: 'Estado', ancho: 36, negrita: false }],
+      rows.map((g) => ({ resaltar: g.logro < n.medio, celdas: [g.nombre, g.preguntas, pct(g.logro), estadoLogro(g.logro)] })));
+    if (A.porContenido.length) { titulo(P, 'Logro por contenido', 0, 40); estado(A.porContenido.slice().sort((a, b) => a.logro - b.logro)); }
+    else parrafo(P, 'El ensayo no trae contenidos específicos por pregunta (columna E de la plantilla): el análisis llega hasta el eje.', { color: C.texto2, tam: 9 });
+    if (A.porOA.length) { titulo(P, 'Logro por objetivo de aprendizaje (OA)', 5, 40); estado(A.porOA.slice().sort((a, b) => a.logro - b.logro)); }
+    else parrafo(P, 'No se informa por OA porque el ensayo no tiene OA asignados a sus preguntas (columna G de la plantilla). La app no asigna OA por su cuenta.', { color: C.texto2, tam: 9 });
+    parrafo(P, `Estado: Consolidado desde ${pct(n.alto)}, En desarrollo desde ${pct(n.medio)}, Crítico bajo ${pct(n.medio)} de logro.`, { color: C.texto2, tam: 8.5 });
+    const habs = conDatos(A.porHabilidad);
+    if (habs.length) {
+      titulo(P, 'Habilidades: detalle', 5, 40);
+      const k = A.hechas.length;
+      tabla(P, [{ titulo: 'Habilidad', ancho: W - 108, envolver: true, negrita: true }, { titulo: 'Preguntas', ancho: 20, der: true }, { titulo: 'Correctas', ancho: 26, der: true }, { titulo: 'Logro', ancho: 16, der: true }, { titulo: 'Bajo · Medio · Alto', ancho: 46, der: true }],
+        habs.sort((a, b) => b.logro - a.logro).map((g) => {
+          const propios = A.hechas.map((x) => g.indices.filter((i) => x.aciertos[i]).length / g.indices.length);
+          const dist = [propios.filter((v) => v < n.medio).length, propios.filter((v) => v >= n.medio && v < n.alto).length, propios.filter((v) => v >= n.alto).length];
+          const corr = A.hechas.reduce((s, x) => s + g.indices.filter((i) => x.aciertos[i]).length, 0);
+          return { celdas: [g.nombre, g.preguntas, `${corr} de ${g.preguntas * k}`, pct(g.logro), dist.join(' · ')] };
+        }));
+      parrafo(P, 'Correctas: respuestas correctas del curso en esas preguntas, sobre el total posible. Bajo · Medio · Alto: estudiantes según su logro en esa habilidad.', { color: C.texto2, tam: 8.5 });
+    }
+  }
+
+  function preguntaPorPregunta(P, A) {
+    const L = A.letras;
+    titulo(P, 'Tabla pregunta por pregunta', 0, 40);
+    const fijo = 9 + 8 + 13 + 13 + 13 + 11 + L.length * 9.5;
+    const libre = W - fijo, conOA = A.preguntas.some((p) => p.oa);
+    tabla(P, [{ titulo: 'N°', ancho: 9, negrita: true }, { titulo: 'Eje · contenido' + (conOA ? ' · OA' : ''), ancho: libre * 0.62, envolver: true, negrita: false }, { titulo: 'Habilidad', ancho: libre * 0.38, envolver: true, negrita: false },
+      { titulo: 'Clave', ancho: 8, negrita: true }, { titulo: '%Corr', ancho: 13, der: true }, { titulo: '%Inc', ancho: 13, der: true }, { titulo: '%Omi', ancho: 13, der: true }, { titulo: 'Más', ancho: 11 },
+      ...L.map((l) => ({ titulo: l, ancho: 9.5, der: true, negrita: false }))],
+    A.preguntas.map((p) => {
+      const t = p.total || 1;
+      return { resaltar: !p.piloto && p.acierto < Estad.CRITICA, celdas: [p.n + (p.piloto ? '*' : ''), [p.eje, p.contenido, p.oa].filter(Boolean).join(' · ') || '–', p.habilidad || '–', p.clave,
+        pct(p.correctas / t), pct(p.incorrectas / t), pct(p.omisiones / t), p.cuenta[p.masElegida] ? p.masElegida : '–', ...L.map((l) => pct((p.cuenta[l] || 0) / t))] };
+    }), { tam: 7.6 });
+    parrafo(P, `%Corr (índice de dificultad: proporción de respuestas correctas), %Inc y %Omi suman 100%. "Más" es la alternativa más elegida. Las columnas ${L.join(', ')} muestran el porcentaje de estudiantes que marcó cada alternativa. Destacadas: bajo ${pct(Estad.CRITICA)} de acierto.${A.pilotos ? ' * pregunta piloto.' : ''}`, { color: C.texto2, tam: 8.5 });
+  }
+
+  // Detalle de las preguntas con más dificultad o con un distractor fuerte
+  function detallePreguntas(P, A) {
+    const elegidas = A.preguntas.filter((p) => !p.piloto && (p.acierto < 0.5 || (p.distractor && p.distractor.n / (p.total || 1) >= 0.3) || p.enunciado || p.errores))
+      .sort((a, b) => a.acierto - b.acierto).slice(0, 6);
+    if (!elegidas.length) return;
+    titulo(P, 'Detalle de las preguntas que más costaron', 6, 50);
+    elegidas.forEach((p) => {
+      P.cabe(34);
+      const { doc } = P;
+      fuente(doc, 10.5, 'bold', C.azul); doc.text(`Pregunta ${p.n}`, M, P.y + 4);
+      fuente(doc, 9, 'normal', C.texto2); doc.text([p.eje, p.contenido, p.oa, p.habilidad].filter(Boolean).join(' · ').slice(0, 110), M + 24, P.y + 4);
+      P.y += 7;
+      if (p.enunciado) parrafo(P, `Enunciado: ${p.enunciado}`, { tam: 9.5 });
+      const dist = A.letras.map((l) => `${l}${l === p.clave ? ' (correcta)' : ''}: ${p.cuenta[l] || 0}`).join('  ·  ') + `  ·  En blanco: ${p.omisiones}`;
+      parrafo(P, `Respuestas de ${p.total} estudiantes: ${dist}.`, { tam: 9.5 });
+      const malas = A.letras.filter((l) => l !== p.clave && (p.cuenta[l] || 0) > 0).sort((a, b) => p.cuenta[b] - p.cuenta[a]);
+      const lineasE = malas.slice(0, 2).map((l) => {
+        const n = p.cuenta[l], err = p.errores && p.errores[l];
+        if (err) return `Alternativa ${l} (${n} estudiante${n === 1 ? '' : 's'}): error asociado según el ensayo: ${minus(err)}.`;
+        if (n / (p.total || 1) >= 0.3) return `Alternativa ${l} (${n} de ${p.total}): hipótesis de un error compartido, por ejemplo un paso omitido o una propiedad mal aplicada. Para confirmarlo, pedir a quienes la marcaron que muestren su desarrollo.`;
+        return null;
+      }).filter(Boolean);
+      if (p.omisiones / (p.total || 1) >= 0.2) lineasE.push(`El ${pct(p.omisiones / p.total)} la dejó en blanco: posible falta de tiempo o de una estrategia de entrada.`);
+      if (!lineasE.length && p.acierto < 0.5) lineasE.push('Las respuestas incorrectas están repartidas entre varias alternativas: más que un error común, apunta a un contenido poco trabajado.');
+      vinetas(P, lineasE, { tam: 9.3 });
+      P.y += 1;
+    });
+  }
+
+  // Tabla privada: fortalezas y contenidos por fortalecer de cada estudiante
+  function tablaIndividual(P, ctx) {
+    const { A, H, ens } = ctx;
+    const idx = H ? H.puntos.findIndex((p) => p.ensayo.id === ens.id) : -1;
+    titulo(P, 'Fortalezas y contenidos por fortalecer de cada estudiante', 6, 40);
+    tabla(P, [{ titulo: 'N°', ancho: 9 }, { titulo: 'Estudiante', ancho: 44, envolver: true }, { titulo: 'C · I · O', ancho: 22, der: true, negrita: false }, { titulo: 'Logro', ancho: 14, der: true, negrita: false },
+      { titulo: 'Fortaleza', ancho: 34, envolver: true, negrita: false }, { titulo: 'Por fortalecer', ancho: 34, envolver: true, negrita: false }, { titulo: 'Evol.', ancho: W - 157, der: true, negrita: false }],
+    A.hechas.slice().sort((a, b) => a.e.lista - b.e.lista).map((x) => {
+      const pf = Estad.perfil(A, x.e.id, null), ejes = conDatos(pf.porEje).sort((a, b) => b.propio - a.propio);
+      const f = ejes[0], d = ejes[ejes.length - 1];
+      const serie = idx > 0 ? (H.estudiantes.find((s) => s.e.id === x.e.id) || { serie: [] }).serie : [];
+      const prev = idx > 0 ? serie.slice(0, idx).filter((v) => v != null).pop() : null;
+      return { celdas: [x.e.lista, x.e.nombre, `${x.correctas} · ${x.incorrectas} · ${x.omitidas}`, pct(x.logro), f && f.propio >= 0.5 ? `${f.nombre} (${pct(f.propio)})` : '–', d && d.propio < 0.75 && d !== f ? `${d.nombre} (${pct(d.propio)})` : '–', prev == null ? '–' : pp(x.logro - prev)] };
+    }), { tam: 8 });
+    parrafo(P, 'C · I · O: correctas, incorrectas y omitidas. Evol.: cambio de logro respecto del ensayo anterior de la misma asignatura. Uso exclusivo del docente.', { color: C.texto2, tam: 8.5 });
+  }
+
+  // Plan de intervención y recomendaciones pedagógicas
+  function planIntervencion(P, ctx) {
+    const { A, ens } = ctx, n = Estad.conf.niveles, filas = [];
+    const ejes = conDatos(A.porEje).sort((a, b) => a.logro - b.logro), habs = conDatos(A.porHabilidad).sort((a, b) => a.logro - b.logro);
+    const objetivo = (v) => `Subir de ${pct(v)} a ${pct(Math.min(0.95, Math.max(n.medio, v + 0.15)))}`;
+    const conts = A.porContenido.length ? A.porContenido.slice().sort((a, b) => a.logro - b.logro).filter((c) => c.logro < n.medio).slice(0, 3) : [];
+    conts.forEach((c) => filas.push(['Alta', c.nombre, objetivo(c.logro), 'Clase de reenseñanza con ejemplos resueltos y práctica guiada en parejas', 'Ticket de salida de 3 preguntas', 'Logro en el ticket y en el próximo ensayo']));
+    ejes.filter((e) => e.logro < n.alto).slice(0, conts.length ? 1 : 2).forEach((e, i) => {
+      const te = Temarios.eje(ens.asignatura, e.nombre);
+      filas.push([e.logro < n.medio ? 'Alta' : 'Media', `${e.nombre}${te ? ': ' + lista(te.contenidos.slice(0, 2).map(minus)) : ''}`, objetivo(e.logro), i === 0 ? 'Guía de ejercitación graduada (de menor a mayor dificultad) y revisión colectiva de errores' : 'Estaciones de práctica por nivel de dominio', 'Mini control quincenal del eje', `Logro del eje sobre ${pct(Math.max(n.medio, e.logro + 0.15))}`]);
+    });
+    if (habs.length && habs[0].logro < n.alto) { const th = Temarios.habilidad(ens.asignatura, habs[0].nombre); filas.push([habs[0].logro < n.medio ? 'Alta' : 'Media', `Habilidad ${minus(habs[0].nombre)}`, objetivo(habs[0].logro), th ? `Problemas donde haya que ${th.descripcion}, con modelado del docente` : 'Problemas que exijan esa habilidad, con modelado del docente', 'Rúbrica breve en una tarea semanal', 'Logro en preguntas de esa habilidad']); }
+    const comp = erroresCompartidos(A);
+    if (comp.length) filas.push(['Media', `Errores frecuentes (preguntas ${numeros(comp)})`, 'Que el curso identifique y corrija el error', 'Análisis de errores: mostrar la alternativa más elegida y discutir por qué no sirve', 'Pregunta similar en la clase siguiente', 'Menos del 15% elige el mismo error']);
+    titulo(P, 'Plan de intervención', 6, 50);
+    if (filas.length) tabla(P, [{ titulo: 'Prioridad', ancho: 17, negrita: true }, { titulo: 'Contenido', ancho: 34, envolver: true, negrita: false }, { titulo: 'Objetivo', ancho: 24, envolver: true, negrita: false }, { titulo: 'Actividad sugerida', ancho: 42, envolver: true, negrita: false }, { titulo: 'Seguimiento', ancho: 28, envolver: true, negrita: false }, { titulo: 'Indicador de avance', ancho: W - 145, envolver: true, negrita: false }],
+      filas.map((f) => ({ celdas: f })), { tam: 8 });
+    else parrafo(P, 'No hay ejes, contenidos ni habilidades bajo el nivel Alto: el plan puede centrarse en profundizar con problemas de mayor dificultad.', { color: C.texto2 });
+    titulo(P, 'Retroalimentación y evaluación formativa', 4, 30);
+    vinetas(P, [
+      'Devolver el ensayo con la tabla de preguntas: que cada estudiante clasifique sus errores en descuido, concepto o procedimiento antes de corregirlos.',
+      comp.length ? `Usar las preguntas ${numeros(comp)} como preguntas bisagra: una pregunta al inicio de la clase para ver quién mantiene el error.` : 'Usar preguntas bisagra al inicio de la clase para comprobar si el contenido reforzado quedó claro.',
+      'Cerrar cada clase de refuerzo con un ticket de salida de 2 o 3 preguntas y retomar al día siguiente lo que salió bajo.',
+      'Volver a medir los mismos ejes en el próximo ensayo y comparar con este informe.',
+    ], { tam: 9.5 });
+  }
+
+  // ---------- 3 y 4. Estudiante y apoderados (acumulativo) ----------
+  // ctxS: { cur, est, sel: [{ ens, A }], ejes: [..] | null, periodo: { desde, hasta }, colegio }
+  function periodoTexto(sel) {
+    const f = sel.map((s) => s.ens.fecha).filter(Boolean);
+    if (!f.length) return 'sin fechas registradas';
+    const o = sel.slice().sort((a, b) => Estad.fechaOrden(a.ens).localeCompare(Estad.fechaOrden(b.ens))).map((s) => s.ens.fecha).filter(Boolean);
+    return o.length === 1 || o[0] === o[o.length - 1] ? o[0] : `${o[0]} al ${o[o.length - 1]}`;
+  }
+  function planMejora(g, ens) {
+    const ejes = conDatos(g.porEje), habs = conDatos(g.porHabilidad);
+    const fortalezas = [...ejes, ...habs.map((h) => ({ ...h, hab: true }))].filter((o) => o.logro >= 0.6).sort((a, b) => b.logro - a.logro).slice(0, 3);
+    const prioridades = [...ejes].filter((o) => o.logro < 0.75).sort((a, b) => a.logro - b.logro).slice(0, 3);
+    const habsD = habs.filter((o) => o.logro < 0.75).sort((a, b) => a.logro - b.logro).slice(0, 2);
+    const contenidos = [];
+    prioridades.forEach((p) => {
+      const propios = [...new Set(g.ensayos.flatMap((e) => e.preguntas.filter((q) => q.eje === p.nombre && !e.x.aciertos[q.i] && q.contenido).map((q) => q.contenido)))];
+      const te = Temarios.eje(ens.asignatura, p.nombre);
+      (propios.length ? propios : te ? te.contenidos : []).slice(0, 3).forEach((c) => { if (!contenidos.includes(c)) contenidos.push(c); });
+    });
+    return { fortalezas, prioridades, habsD, contenidos: contenidos.slice(0, 6) };
+  }
+
+  function seccionEstudiante(P, ctxS) {
+    const { cur, est, sel } = ctxS, pila = nombrePila(est.nombre);
+    const C2 = Estad.consolidar(est.id, sel, ctxS.ejes);
+    banda(P, est.nombre, `Informe personal de resultados · ${cur.nombre}`, [`Período: ${periodoTexto(sel)}`, `${plural(sel.length, 'ensayo', 'ensayos')}`, `generado el ${hoy()}`].join(' · '));
+    titulo(P, 'Ficha personal', 0, 40);
+    ficha(P, [['Nombre', est.nombre], ['Curso', cur.nombre], ['Período evaluado', periodoTexto(sel)],
+      ['Ensayos considerados', sel.map((s) => `${s.ens.nombre}${s.ens.fecha ? ` (${s.ens.fecha})` : ''}`).join('; ')],
+      ['Temáticas', ctxS.ejes ? lista(ctxS.ejes) : 'Todas las de los ensayos']]);
+    if (!C2.length) { parrafo(P, 'No hay respuestas para las temáticas y ensayos elegidos.', { color: C.critico }); return; }
+    if (C2.length > 1) parrafo(P, `Los ensayos son de ${C2.length} instrumentos distintos (${lista(C2.map((g) => g.nombre))}). Cada uno se informa por separado, con su propia escala.`, { color: C.texto2, tam: 9.5 });
+    C2.forEach((g) => {
+      const ens = g.ensayos[g.ensayos.length - 1].ens;
+      seccion(P, C2.indexOf(g) + 1, g.nombre, 70);
+      cifras(P, [
+        { etiqueta: 'Resultado global', valor: pct(g.logro), detalle: `${g.correctas} de ${g.preguntas} correctas` },
+        { etiqueta: 'Ensayos', valor: String(g.cantidad), detalle: `${g.preguntas} preguntas en total` },
+        { etiqueta: 'Incorrectas', valor: String(g.incorrectas), detalle: 'respuestas marcadas' },
+        { etiqueta: 'En blanco', valor: String(g.omisiones), detalle: 'sin responder' },
+      ]);
+      if (g.cantidad > 1) parrafo(P, `El resultado global suma las respuestas correctas de los ${g.cantidad} ensayos y las divide por el total de preguntas (${g.correctas} ÷ ${g.preguntas}). No es el promedio de los porcentajes, porque los ensayos no tienen la misma cantidad de preguntas.`, { color: C.texto2, tam: 9 });
+      tabla(P, [{ titulo: 'Ensayo', ancho: W - 108, envolver: true, negrita: true }, { titulo: 'Fecha', ancho: 22, negrita: false }, { titulo: 'Preguntas', ancho: 20, der: true }, { titulo: 'Correctas', ancho: 20, der: true }, { titulo: 'Blanco', ancho: 16, der: true }, { titulo: 'Logro', ancho: 30, der: true }],
+        g.ensayos.map((e) => ({ celdas: [e.ens.nombre, e.ens.fecha || '', e.preguntas.length, e.correctas, e.omisiones, `${pct(e.logro)}${!ctxS.ejes && e.x.puntaje != null ? ` · ${e.x.puntaje} pts.` : ''}`] })));
+      if (g.cantidad >= 2) {
+        titulo(P, 'Evolución', 3, 60);
+        const ejesS = conDatos(g.porEje).filter((o) => o.serie.filter((v) => v != null).length >= 2).slice(0, 4);
+        lineas(P, [{ nombre: 'Global', color: C.azul, grueso: true, unir: true, valores: g.ensayos.map((e) => e.logro) },
+          ...ejesS.map((o, k) => ({ nombre: o.nombre.split(' ')[0], color: C.cat[(k + 1) % C.cat.length], unir: true, valores: o.serie }))], g.ensayos.map((e) => etiquetaEns(e.ens)), { alto: 40 });
+        const d = g.cambio, rel = g.cambioRelativo;
+        const t = Math.abs(d) < 0.03 ? `Entre el primer y el último ensayo, el resultado se mantuvo estable (${pct(g.ensayos[0].logro)} y ${pct(g.ensayos[g.cantidad - 1].logro)}).`
+          : `Entre el primer y el último ensayo ${d > 0 ? 'subiste' : 'bajaste'} ${pts(d)} (de ${pct(g.ensayos[0].logro)} a ${pct(g.ensayos[g.cantidad - 1].logro)}).`;
+        const rels = rel == null ? '' : Math.sign(rel) !== Math.sign(d) && Math.abs(rel) >= 0.03 ? ' Ojo: los ensayos no tienen la misma dificultad y, tomando eso en cuenta, el cambio va en la dirección contraria. Conviene confirmarlo con el próximo ensayo.' : Math.abs(d) >= 0.03 && Math.abs(rel) < 0.03 ? ' Parte de este cambio puede deberse a que los ensayos tenían distinta dificultad.' : '';
+        parrafo(P, t + rels, { tam: 10 });
+      }
+      const ejes = conDatos(g.porEje), habs = conDatos(g.porHabilidad);
+      if (ejes.length) { titulo(P, 'Resultado por temática', 4, ejes.length * 10 + 10); barras(P, ejes.map((o) => ({ nombre: o.nombre, valor: o.logro, color: o.logro < 0.5 ? C.critico : C.serie })), { formato: (v) => `${pct(v)}` }); }
+      if (habs.length) { titulo(P, 'Resultado por habilidad', 3, habs.length * 10 + 10); barras(P, habs.map((o) => ({ nombre: o.nombre, valor: o.logro, color: o.logro < 0.5 ? C.critico : C.serie }))); }
+      const rec = [];
+      if (g.fortalezas.length) rec.push(`Fortalezas que se repiten: en ${lista(g.fortalezas.map((o) => o.nombre))} estuviste sobre 70% en todos los ensayos.`);
+      if (g.persistentes.length) rec.push(`Dificultades que se mantienen: ${lista(g.persistentes.map((o) => o.nombre))} quedó bajo 50% en todos los ensayos. Es lo primero que conviene estudiar.`);
+      if (rec.length) vinetas(P, rec, { tam: 10 });
+      // Preguntas para revisar
+      const revisar = g.ensayos.map((e) => ({ e, ns: e.preguntas.filter((q) => !e.x.aciertos[q.i]).map((q) => q.n) })).filter((o) => o.ns.length);
+      if (revisar.length) {
+        titulo(P, 'Preguntas que conviene revisar', 3, 20);
+        vinetas(P, revisar.map((o) => `${o.e.ens.nombre}: ${o.ns.length > 20 ? o.ns.slice(0, 20).join(', ') + ' y otras' : o.ns.join(', ')}.`), { tam: 9.5 });
+      }
+      // Plan personal de mejora
+      const pm = planMejora(g, ens);
+      titulo(P, 'Tu plan personal de mejora', 5, 60);
+      const hab = (o) => { const th = Temarios.habilidad(ens.asignatura, o.nombre); return th ? th.descripcion : minus(o.nombre); };
+      recuadros(P, [
+        { titulo: 'Tus fortalezas', color: C.t3, fondo: '#EEF4FC', items: pm.fortalezas.length ? pm.fortalezas.map((o) => (o.hab ? `Habilidad ${minus(o.nombre)}: ${o.correctas} de ${o.preguntas} correctas. Sabes ${hab(o)}.` : `${o.nombre}: ${o.correctas} de ${o.preguntas} correctas (${pct(o.logro)}).`)) : [`Respondiste bien ${g.correctas} preguntas: esa es tu base para avanzar.`] },
+        { titulo: 'Tus prioridades', color: C.critico, fondo: '#FCF0E9', items: pm.prioridades.length ? pm.prioridades.map((o, i) => `${i + 1}. ${o.nombre}: ${o.correctas} de ${o.preguntas} correctas (${pct(o.logro)}).`) : ['Mantener el nivel y practicar con preguntas más difíciles.'] },
+      ]);
+      const act = [];
+      if (pm.contenidos.length) act.push(`Contenidos para practicar: ${lista(pm.contenidos.map(minus))}.`);
+      if (pm.habsD.length) act.push(`Habilidades para desarrollar: ${lista(pm.habsD.map((o) => `${minus(o.nombre)} (${hab(o)})`))}.`);
+      if (pm.prioridades.length) act.push(`Actividad sugerida: resuelve 8 a 10 ejercicios de ${pm.prioridades[0].nombre} por semana y revisa el desarrollo de cada uno, no solo el resultado.`);
+      if (revisar.length) act.push('Vuelve a resolver las preguntas que fallaste sin mirar la clave; después compara y anota qué te hizo equivocarte.');
+      if (g.omisiones >= 3) act.push('Practica un ensayo con tiempo controlado para no dejar preguntas en blanco: una respuesta en blanco nunca suma.');
+      const p0 = pm.prioridades[0];
+      act.push(p0 ? `Meta para el próximo ensayo: llegar a ${pct(Math.min(0.95, Math.max(0.5, p0.logro + 0.15)))} en ${p0.nombre} y a ${pct(Math.min(1, g.logro + 0.07))} de resultado global.` : `Meta para el próximo ensayo: mantener o superar ${pct(g.logro)} de resultado global.`);
+      vinetas(P, act, { tam: 10 });
+    });
+    parrafo(P, `${pila}, estos resultados muestran dónde estás hoy, no un límite. Los puntajes y niveles son estimaciones a partir de ensayos y sirven para orientar el estudio.`, { color: C.texto2, tam: 9 });
+    notaMetodologica(P, { consolidado: true, tieneTabla: sel.some((s) => Estad.tieneTabla(s.ens)), tieneCortes: sel.some((s) => Estad.cortesDe(s.ens)) });
+  }
+
+  function seccionApoderado(P, ctxS) {
+    const { cur, est, sel } = ctxS, pila = nombrePila(est.nombre), col = ctxS.colegio || {};
+    const C2 = Estad.consolidar(est.id, sel, ctxS.ejes);
+    banda(P, est.nombre, `Informe para la familia · ${cur.nombre}`, [`Período: ${periodoTexto(sel)}`, `generado el ${hoy()}`].join(' · '));
+    titulo(P, 'Identificación', 0, 30);
+    ficha(P, [['Estudiante', est.nombre], ['Curso', cur.nombre], ['Evaluaciones', sel.map((s) => s.ens.nombre).join('; ')], ['Fecha o período', periodoTexto(sel)]]);
+    if (!C2.length) { parrafo(P, 'No hay respuestas para los ensayos elegidos.', { color: C.critico }); return; }
+    C2.forEach((g) => {
+      const ens = g.ensayos[g.ensayos.length - 1].ens, ejes = conDatos(g.porEje), habs = conDatos(g.porHabilidad);
+      titulo(P, C2.length > 1 ? `Resultado general en ${g.nombre}` : 'Resultado general', 6, 95);
+      cifras(P, [
+        { etiqueta: 'Respuestas correctas', valor: `${g.correctas} de ${g.preguntas}`, detalle: g.omisiones ? `${g.omisiones} sin responder` : 'respondió todas' },
+        { etiqueta: 'Porcentaje de logro', valor: pct(g.logro), detalle: g.cantidad > 1 ? 'de todos los ensayos juntos' : ens.nombre },
+        { etiqueta: 'Ensayos considerados', valor: String(g.cantidad), detalle: g.nombre },
+        { etiqueta: 'Temáticas evaluadas', valor: String(ejes.length), detalle: lista(ejes.map((o) => o.nombre)) },
+      ]);
+      const fuertes = ejes.filter((o) => o.logro >= 0.6).slice(0, 3), debiles = ejes.filter((o) => o.logro < 0.6).sort((a, b) => a.logro - b.logro).slice(0, 3);
+      const hab = (o) => { const th = Temarios.habilidad(ens.asignatura, o.nombre); return th ? th.descripcion : minus(o.nombre); };
+      const bueno = fuertes.map((o) => `Maneja bien ${o.nombre}: respondió correctamente ${o.correctas} de ${o.preguntas} preguntas.`);
+      habs.filter((o) => o.logro >= 0.7).slice(0, 2).forEach((o) => bueno.push(`Sabe ${hab(o)}.`));
+      if (!bueno.length) bueno.push(`Respondió bien ${g.correctas} preguntas. Desde ahí se construye el avance.`);
+      const mejorar = debiles.map((o) => { const te = Temarios.eje(ens.asignatura, o.nombre); return `${o.nombre} necesita más práctica (${o.correctas} de ${o.preguntas} correctas)${te ? `. Incluye temas como ${lista(te.contenidos.slice(0, 3).map(minus))}` : ''}.`; });
+      if (!mejorar.length) mejorar.push('No hay temáticas bajo lo esperado. El desafío es mantener el ritmo y practicar con problemas más exigentes.');
+      recuadros(P, [{ titulo: 'Fortalezas', color: C.t3, fondo: '#EEF4FC', items: bueno }, { titulo: 'Aspectos por fortalecer', color: C.critico, fondo: '#FCF0E9', items: mejorar }]);
+      if (g.cantidad >= 2) {
+        titulo(P, 'Evolución', 4, 55);
+        lineas(P, [{ nombre: pila, color: C.azul, grueso: true, unir: true, valores: g.ensayos.map((e) => e.logro) }], g.ensayos.map((e) => etiquetaEns(e.ens)), { alto: 34 });
+        const d = g.cambio;
+        parrafo(P, `${Math.abs(d) < 0.03 ? `Su resultado se ha mantenido estable entre ${pct(g.ensayos[0].logro)} y ${pct(g.ensayos[g.cantidad - 1].logro)}.` : d > 0 ? `Subió de ${pct(g.ensayos[0].logro)} a ${pct(g.ensayos[g.cantidad - 1].logro)} entre el primer y el último ensayo.` : `Bajó de ${pct(g.ensayos[0].logro)} a ${pct(g.ensayos[g.cantidad - 1].logro)} entre el primer y el último ensayo.`} Los ensayos no siempre tienen la misma dificultad, así que conviene mirar la tendencia más que un resultado aislado.`, { tam: 10 });
+      }
+    });
+    const g0 = C2[0], debil = conDatos(g0.porEje).sort((a, b) => a.logro - b.logro)[0];
+    titulo(P, 'Orientaciones para la familia', 6, 50);
+    vinetas(P, [
+      `Acordar un horario fijo de estudio, por ejemplo 30 a 40 minutos, tres veces por semana${debil && debil.logro < 0.6 ? `, dedicando una parte a ${debil.nombre}` : ''}.`,
+      'Acompañar la revisión de las tareas y ensayos: pedirle que explique cómo resolvió un ejercicio ayuda más que revisar solo si la respuesta está buena.',
+      'Promover hábitos de estudio: un lugar tranquilo, sin celular cerca, y pausas cortas cada 25 minutos.',
+      'Aprovechar situaciones cotidianas para resolver problemas: calcular descuentos, comparar precios, leer gráficos de las noticias o estimar tiempos de viaje.',
+      `Mantener contacto con el docente${col.responsable ? ` (${col.responsable})` : ''} para saber qué se está reforzando en clases y cómo apoyar desde la casa.`,
+    ], { tam: 10 });
+    titulo(P, 'Mensaje final', 5, 25);
+    const mejora = C2.find((g) => g.cambio != null && g.cambio >= 0.03);
+    const fuerte = conDatos(g0.porEje).sort((a, b) => b.logro - a.logro)[0];
+    parrafo(P, `${mejora ? `${pila} mostró un avance en ${mejora.nombre} y eso habla de su esfuerzo. ` : ''}${fuerte && fuerte.logro >= 0.6 ? `Tiene una base sólida en ${fuerte.nombre}. ` : ''}${debil && debil.logro < 0.6 ? `Con práctica constante en ${debil.nombre} puede seguir mejorando. ` : ''}Cada ensayo es una oportunidad para aprender: lo importante es el progreso, y el apoyo de la familia hace una diferencia real.`, { tam: 10.5 });
+    parrafo(P, 'Este informe muestra solo los resultados de su estudiante: no incluye rankings ni comparaciones con otros estudiantes. Los porcentajes vienen de ensayos y orientan el estudio; no son resultados oficiales.', { color: C.texto2, tam: 8.5 });
+  }
+
+  // ---------- Exportaciones ----------
+  const docCon = (ctx, pie) => { const P = nuevoDoc(ctx); P.pie = pie; return P; };
+  const nuevaPagina = (P) => { P.doc.addPage(); P.y = M; };
+  const pieDe = (ctx, tipo, extra) => [(ctx.colegio || {}).nombre || 'Lector óptico', tipo, extra].filter(Boolean).join(' · ');
+
+  function directivo(ctxD) {
+    const P = docCon(ctxD, pieDe(ctxD, 'Resumen para equipo directivo', `${ctxD.ens.nombre}`));
+    seccionDirectivo(P, ctxD); piePaginas(P); return P.doc.output('blob');
+  }
+  function docente(ctx, { fichas = true } = {}) {
+    const P = docCon(ctx, pieDe(ctx, 'Informe para el docente', `${ctx.ens.nombre} · ${ctx.cur.nombre}`));
+    cuerpoCurso(P, ctx);
+    if (fichas) paginasEstudiantes(P, ctx, null, true, 'docente');
+    piePaginas(P); return P.doc.output('blob');
+  }
+  // ctxS puede ser un estudiante o una lista (un informe por estudiante en el mismo PDF)
+  function acumulado(ctxS, modo = 'estudiante') {
+    const lista2 = Array.isArray(ctxS) ? ctxS : [ctxS], c0 = lista2[0];
+    const P = docCon(c0, pieDe(c0, modo === 'apoderado' ? 'Informe para padres y apoderados' : 'Informe del estudiante', lista2.length === 1 ? `${c0.est.nombre} · ${c0.cur.nombre}` : c0.cur.nombre));
+    lista2.forEach((c, i) => { if (i) nuevaPagina(P); (modo === 'apoderado' ? seccionApoderado : seccionEstudiante)(P, c); });
+    piePaginas(P); return P.doc.output('blob');
+  }
+  // Las cuatro secciones en un documento: directivo, docente y, por cada estudiante elegido, su informe y el de su familia
+  function completo({ dir, doc: ctxDoc, estudiantes: lista2 = [], fichas = false }) {
+    const P = docCon(ctxDoc, pieDe(ctxDoc, 'Informe completo', `${ctxDoc.ens.nombre} · ${ctxDoc.cur.nombre}`));
+    let primera = true;
+    const sig = () => { if (!primera) nuevaPagina(P); primera = false; };
+    if (dir) { sig(); seccionDirectivo(P, dir); }
+    sig(); cuerpoCurso(P, ctxDoc); if (fichas) paginasEstudiantes(P, ctxDoc, null, true, 'docente');
+    lista2.forEach((s) => { sig(); seccionEstudiante(P, s); sig(); seccionApoderado(P, s); });
+    piePaginas(P); return P.doc.output('blob');
+  }
+
+  // Cifras para la vista previa de la app (sin dibujar)
+  function vistaPrevia(ctxD) {
+    return { indicadores: ctxD.inst.resumen, alertas: alertasInstitucionales(ctxD.porCurso, ctxD.inst) };
+  }
+
+  return { curso, estudiantes, estudiante, directivo, docente, acumulado, completo, vistaPrevia };
 })();
