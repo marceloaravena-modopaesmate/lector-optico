@@ -442,7 +442,7 @@ const Estad = (() => {
       if (x.logro < u.riesgo && cambio != null && cambio < 0) lista.push({ id: 'riesgo', texto: 'Bajo logro y bajando' });
       else if (ultimos.length >= 3 && ultimos.every((v) => v < u.riesgo)) lista.push({ id: 'riesgo', texto: `Bajo ${Math.round(u.riesgo * 100)}% en los tres últimos ensayos` });
       else if (x.logro < u.riesgo) lista.push({ id: 'bajo', texto: `Bajo ${Math.round(u.riesgo * 100)}% de logro` });
-      else if (x.nota < conf.escala.aprobacion) lista.push({ id: 'bajo', texto: `Nota bajo ${notaTexto(conf.escala.aprobacion)}` });
+      else if (x.logro < conf.niveles.medio - 1e-9) lista.push({ id: 'bajo', texto: `Nivel Bajo de desempeño (menos de ${Math.round(conf.niveles.medio * 100)}%)` });
       if (cambio != null && cambio <= -u.baja) lista.push({ id: 'baja', texto: `Bajó ${Math.round(-cambio * 100)} puntos` });
       if (x.omitidas / A.n > u.omision) lista.push({ id: 'omision', texto: `${x.omitidas} preguntas en blanco` });
       const peso = { riesgo: 3, baja: 2, bajo: 1, omision: 1 };
@@ -524,8 +524,9 @@ const Estad = (() => {
       if (sig) meta = { faltan: Math.ceil(sig[1] * A.n - 1e-9) - P.correctas, texto: `el nivel ${sig[0]}` };
     }
     if (!meta) {
-      const ap = conf.escala.aprobacion;
-      if (P.nota < ap) { let c = P.correctas; while (c < A.n && nota((c) / A.n) < ap) c++; meta = { faltan: c - P.correctas, texto: `nota ${notaTexto(ap)}` }; }
+      // Sin notas: la meta siguiente es el nivel de desempeño superior
+      const nv = conf.niveles, sig = P.logro < nv.medio ? ['Medio', nv.medio] : P.logro < nv.alto ? ['Alto', nv.alto] : null;
+      if (sig) meta = { faltan: Math.ceil(sig[1] * A.n - 1e-9) - P.correctas, texto: `el nivel ${sig[0]}` };
     }
     // Contenidos de las preguntas falladas (si el ensayo los trae)
     const contenidos = new Map();

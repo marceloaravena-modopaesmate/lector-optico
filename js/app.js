@@ -1440,7 +1440,7 @@
       pasos += pasoEnsayo();
       pasos += paso('Cursos', `<span class="nota">Todos los cursos que rindieron ${h(ens.nombre)}${[...new Set(CE.disponibles.map((c) => nombreNivel(c)))].length > 1 ? ', de todos los niveles' : ''}. Quita los que no quieras incluir.</span>
         <div class="filtros">${CE.disponibles.map((c) => chip('inf-ens-curso', c.id, CE.sel.some((x) => x.id === c.id), c.nombre)).join('')}</div>`);
-      pasos += paso('Opciones', interruptor('inf-ens-nomina', S.nominaEns !== false, 'Incluir la nómina de cada curso', 'Una tabla por curso con cada estudiante: correctas, logro, puntaje o nota y nivel. Sin esta opción, el informe no lleva nombres de estudiantes.'));
+      pasos += paso('Opciones', interruptor('inf-ens-nomina', S.nominaEns !== false, 'Incluir la nómina de cada curso', 'Una tabla por curso con cada estudiante: correctas, logro, puntaje y nivel. Sin esta opción, el informe no lleva nombres de estudiantes.'));
     } else if (modo === 'dirB') {
       pasos += pasoEnsayo() + pasoCursosNivel('Van todos los cursos del nivel que rindieron el ensayo. Quita los que no quieras incluir.');
     } else if (modo === 'docB') {
