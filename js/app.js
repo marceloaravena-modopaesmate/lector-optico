@@ -384,7 +384,7 @@
     if (rev.error) avisos.push(`<div class="aviso mal">${ICONO.alerta}<span>${h(rev.error)}</span></div>`);
     if (pendientes) avisos.push(`<div class="aviso rev">${ICONO.alerta}<span><b>${pendientes} por revisar:</b> toca la pregunta y elige la respuesta.</span></div>`);
     if (rev.sugerido && est && rev.sugerido.estudiante.id !== est.id) avisos.push(`<div class="aviso rev respaldo">${ICONO.alerta}<span>El N° de lista marcado es de <b>${h(est.nombre)}</b>, pero el nombre escrito en la hoja parece ser <b>${h(rev.sugerido.estudiante.nombre)}</b> (${h(rev.sugerido.curso.nombre)}).</span><div class="fila-botones"><button class="btn" data-accion="usar-nombre">Es de ${h(Estad.nombres(rev.sugerido.estudiante.nombre).pila)}</button></div></div>`);
-    if (rev.yaExistia) avisos.push(`<div class="aviso rev">${ICONO.alerta}<span>Este estudiante ya tenía una hoja corregida. Al guardar se reemplaza.</span></div>`);
+    if (rev.yaExistia) avisos.push(`<div class="aviso rev respaldo">${ICONO.alerta}<span>Este estudiante ya tenía una hoja corregida. Al guardar se reemplaza.</span>${rev.origen !== 'guardada' ? `<div class="fila-botones"><button class="btn" data-accion="omitir-hoja">${E.cola.length ? 'Omitir y seguir con la siguiente' : 'Omitir y dejar la guardada'}</button></div>` : ''}</div>`);
     let selector = '';
     // Sin QR del ensayo, el docente puede indicar a qué ensayo corresponde la hoja
     if (!rev.ensayoQR && rev.origen !== 'guardada' && ensayos().length > 1) {
@@ -2141,6 +2141,13 @@
     auto: () => { E.camara.auto = !E.camara.auto; const b = document.querySelector('.interruptor'); if (b) b.setAttribute('aria-checked', E.camara.auto); },
     capturar: () => capturarVideo(),
     repetir: () => { E.revision = null; ir('camara'); },
+    'omitir-hoja': async () => {
+      const rev = E.revision; if (!rev) return;
+      toast(`Dejé la hoja que ya estaba guardada${rev.estudiante ? ' de ' + Estad.nombres(rev.estudiante.nombre).pila : ''}`);
+      E.revision = null;
+      if (E.cola.length) { E.pantalla = 'camara'; render(); siguienteDeCola(); return; }
+      await ir('camara');
+    },
     'elegir-candidato': (a) => {
       const rev = E.revision, c = rev && (rev.candidatosNombre || [])[Number(a)]; if (!c) return;
       rev.curso = c.curso; rev.estudiante = c.estudiante; rev.origen = 'nombre'; rev.candidatosNombre = null;
