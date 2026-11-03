@@ -566,9 +566,91 @@
           <div class="fila-botones"><button class="btn" data-accion="hojas-pdf-curso">PDF</button><button class="btn" data-accion="hojas-tex-curso">LaTeX</button></div>`
           : '<span style="font-size:14px;color:var(--texto-2)">Crea un ensayo para generar las hojas.</span>'}
         </section>
-        <div class="tarjeta lista">${c.estudiantes.map((e) => `<div class="item"><span class="n num">${e.lista}</span><span class="principal"><b>${h(e.nombre)}</b><span>${h(e.rut || 'Sin RUT')} · código ${h(e.id)}</span></span></div>`).join('')}</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline"><h2 class="titulo-seccion">Estudiantes</h2>
+          <button class="btn" style="min-height:36px" data-accion="nuevo-est">+ Agregar</button></div>
+        <span class="nota">Toca un estudiante para editar su perfil: nombre, curso, RUT y correos.</span>
+        <div class="tarjeta lista">${[...c.estudiantes].sort((a, b) => a.lista - b.lista).map((e) => `<button class="item" data-accion="editar-est" data-a="${h(e.id)}"><span class="n num">${e.lista}</span><span class="principal"><b>${h(e.nombre)}</b><span>${h([e.rut || 'Sin RUT', e.correo ? '✉ estudiante' : '', e.correoApoderado ? '✉ apoderado' : ''].filter(Boolean).join(' · '))}</span></span><span class="di-flecha" style="font-size:22px;color:var(--texto-2)" aria-hidden="true">›</span></button>`).join('')}</div>
         <button class="btn" style="color:var(--mal-texto)" data-accion="borrar-curso">Borrar curso</button>
       </div></div>`;
+  }
+
+  // Perfil editable de un estudiante (o uno nuevo) del curso abierto
+  function pPerfilEstudiante() {
+    const c = Almacen.obtener('cursos', E.cursoAbierto);
+    if (!c) return pCursos();
+    const nuevo = !E.estEditado;
+    const e = nuevo ? { lista: Math.max(0, ...c.estudiantes.map((x) => x.lista || 0)) + 1, nombre: '', rut: '' } : c.estudiantes.find((x) => x.id === E.estEditado);
+    if (!e) return pCursoDetalle();
+    const conHojas = nuevo ? 0 : ensayos().filter((en) => hojasDe(en, c)[e.id]).length;
+    return `<div class="pantalla sin-nav">${cabecera(nuevo ? 'Nuevo estudiante' : e.nombre, c.nombre, 'curso-detalle')}
+      <div class="cuerpo">
+        <section class="tarjeta pad perfil-est">
+          <span class="etiqueta">Datos del estudiante</span>
+          <label class="campo" for="pe-nombre">Nombre completo<input id="pe-nombre" autocomplete="off" value="${h(e.nombre)}" placeholder="Nombres y apellidos"></label>
+          <div class="dos">
+            <label class="campo" for="pe-lista">N° de lista<input id="pe-lista" type="number" min="1" inputmode="numeric" value="${h(String(e.lista || ''))}"></label>
+            <label class="campo" for="pe-rut">RUT<input id="pe-rut" autocomplete="off" value="${h(e.rut || '')}" placeholder="12.345.678-9"></label>
+          </div>
+          <label class="campo" for="pe-curso">Curso<select id="pe-curso">${cursos().map((x) => `<option value="${h(x.id)}" ${x.id === c.id ? 'selected' : ''}>${h(x.nombre)}</option>`).join('')}</select></label>
+          <span class="etiqueta" style="margin-top:6px">Correos</span>
+          <label class="campo" for="pe-correo">Correo del estudiante<input id="pe-correo" type="email" inputmode="email" autocomplete="off" value="${h(e.correo || '')}" placeholder="nombre@correo.cl"></label>
+          <label class="campo" for="pe-correo-apo">Correo del apoderado<input id="pe-correo-apo" type="email" inputmode="email" autocomplete="off" value="${h(e.correoApoderado || '')}" placeholder="apoderado@correo.cl"></label>
+          <button class="btn primario" data-accion="guardar-est">${nuevo ? 'Agregar estudiante' : 'Guardar cambios'}</button>
+          ${nuevo ? '' : `<span class="nota">Código del estudiante: ${h(e.id)}. No cambia al editar, así sus hojas corregidas y el QR de su hoja siguen funcionando.${conHojas ? ` Tiene hojas en ${conHojas} ensayo${conHojas === 1 ? '' : 's'}; si lo cambias de curso, sus hojas se van con él.` : ''}</span>`}
+        </section>
+        ${nuevo ? '' : `<button class="btn" style="color:var(--mal-texto)" data-accion="borrar-est">Quitar del curso</button>`}
+      </div></div>`;
+  }
+  async function guardarPerfilEstudiante() {
+    const val = (id) => document.getElementById(id).value.trim();
+    const nombre = val('pe-nombre').replace(/\s+/g, ' '), lista = parseInt(val('pe-lista'), 10), rut = val('pe-rut');
+    const correo = val('pe-correo'), correoApoderado = val('pe-correo-apo'), destino = val('pe-curso');
+    if (!nombre) { toast('Escribe el nombre del estudiante.'); return; }
+    if (!(lista > 0)) { toast('El N° de lista debe ser un número mayor que 0.'); return; }
+    if ((correo && !correoValido(correo)) || (correoApoderado && !correoValido(correoApoderado))) { toast('Revisa el correo: debe tener la forma nombre@dominio.cl'); return; }
+    const origen = Almacen.obtener('cursos', E.cursoAbierto), dest = Almacen.obtener('cursos', destino) || origen;
+    const otro = dest.estudiantes.find((x) => x.lista === lista && x.id !== E.estEditado);
+    if (otro) { toast(`El N° ${lista} ya es de ${otro.nombre} en ${dest.nombre}.`); return; }
+    let est;
+    if (E.estEditado) {
+      est = origen.estudiantes.find((x) => x.id === E.estEditado);
+      if (!est) return;
+    } else {
+      est = {};
+    }
+    Object.assign(est, { nombre, lista, rut });
+    if (correo) est.correo = correo; else delete est.correo;
+    if (correoApoderado) est.correoApoderado = correoApoderado; else delete est.correoApoderado;
+    if (!E.estEditado) {
+      let id = idEstudiante(dest, est), k = 2;
+      const usados = new Set(cursos().flatMap((x) => x.estudiantes.map((y) => y.id)));
+      while (usados.has(id)) id = idEstudiante(dest, est) + '-' + k++;
+      est.id = id;
+      dest.estudiantes.push(est);
+      await Almacen.guardar('cursos', dest.id, dest);
+      toast(`${corto(nombre)} agregado a ${dest.nombre}`);
+    } else if (dest.id !== origen.id) {
+      // Cambio de curso: el estudiante y sus hojas corregidas pasan al curso nuevo
+      origen.estudiantes = origen.estudiantes.filter((x) => x.id !== est.id);
+      dest.estudiantes.push(est);
+      for (const en of ensayos()) {
+        const r = Almacen.obtener('resultados', idResultados(en.id, origen.id));
+        if (!r || !r.hojas || !r.hojas[est.id]) continue;
+        const idD = idResultados(en.id, dest.id);
+        const rd = Almacen.obtener('resultados', idD) || { ensayo: en.id, curso: dest.id, hojas: {} };
+        rd.hojas = { ...rd.hojas, [est.id]: r.hojas[est.id] };
+        const resto = { ...r.hojas }; delete resto[est.id];
+        await Almacen.guardar('resultados', idD, rd);
+        await Almacen.guardar('resultados', idResultados(en.id, origen.id), { ...r, hojas: resto });
+      }
+      await Almacen.guardar('cursos', origen.id, origen);
+      await Almacen.guardar('cursos', dest.id, dest);
+      toast(`${corto(nombre)} pasó a ${dest.nombre}`);
+    } else {
+      await Almacen.guardar('cursos', origen.id, origen);
+      toast('Cambios guardados');
+    }
+    E.cursoAbierto = dest.id; E.estEditado = null; E.pantalla = 'curso-detalle'; render();
   }
 
   // ---------- Estadísticas ----------
@@ -919,7 +1001,7 @@
     return `<section class="tarjeta pad contacto"><span class="etiqueta">Correos</span>
       <label class="campo" for="correo-est">Correo del estudiante<input type="email" id="correo-est" inputmode="email" autocomplete="off" placeholder="nombre@correo.cl" value="${h(est.correo || '')}"></label>
       <label class="campo" for="correo-apo">Correo del apoderado<input type="email" id="correo-apo" inputmode="email" autocomplete="off" placeholder="apoderado@correo.cl" value="${h(est.correoApoderado || '')}"></label>
-      <button class="btn" data-accion="guardar-contacto" data-a="${h(est.id)}">Guardar correos</button>
+      <div class="fila-botones"><button class="btn" data-accion="guardar-contacto" data-a="${h(est.id)}">Guardar correos</button><button class="btn" data-accion="perfil-desde-ficha" data-a="${h(est.id)}">Editar perfil</button></div>
       <span class="nota">También puedes cargarlos en la lista del curso (columnas E y F de la plantilla).</span>
     </section>`;
   }
@@ -1330,7 +1412,7 @@
 
   const PANTALLAS = {
     inicio: pInicio, camara: pCamara, revision: pRevision, curso: pCurso, ensayos: pEnsayos,
-    'ensayo': pEnsayo, cursos: pCursos, 'curso-detalle': pCursoDetalle, estadisticas: pEstadisticas,
+    'ensayo': pEnsayo, cursos: pCursos, 'curso-detalle': pCursoDetalle, 'perfil-est': pPerfilEstudiante, estadisticas: pEstadisticas,
     informes: pInformes, ajustes: pAjustes, ficha: pFicha, colegio: pColegio,
   };
 
@@ -1634,8 +1716,12 @@
       const previo = Almacen.obtener('cursos', id);
       const antes = new Map(((previo && previo.estudiantes) || []).map((e) => [e.id, e]));
       curso.estudiantes = lista.map((e) => ({ lista: e.lista, nombre: e.nombre, rut: e.rut }));
+      const norm = (t) => (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+      const previos = [...antes.values()];
       curso.estudiantes.forEach((e, k) => {
-        e.id = idEstudiante(curso, e);
+        // Si el estudiante ya existía (mismo código, RUT o nombre) conserva su código, para no perder sus hojas
+        const ya = antes.get(idEstudiante(curso, e)) || previos.find((x) => (e.rut && x.rut && Almacen.id(x.rut) === Almacen.id(e.rut)) || norm(x.nombre) === norm(e.nombre));
+        e.id = ya ? ya.id : idEstudiante(curso, e);
         // Los correos de la planilla mandan; si vienen vacíos se conservan los que ya estaban guardados
         const a = antes.get(e.id) || {};
         const correo = lista[k].correo || a.correo, correoApoderado = lista[k].correoApoderado || a.correoApoderado;
@@ -1815,6 +1901,25 @@
     'hojas-pdf': () => { leerFormularioEnsayo(); generarHojas(E.ensayoEditado, Almacen.obtener('cursos', document.getElementById('e-curso').value), 'pdf'); },
     'hojas-tex': () => { leerFormularioEnsayo(); generarHojas(E.ensayoEditado, Almacen.obtener('cursos', document.getElementById('e-curso').value), 'tex'); },
     'abrir-curso': (a) => { E.cursoAbierto = a; E.pantalla = 'curso-detalle'; render(); },
+    'editar-est': (a) => { E.estEditado = a; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
+    'nuevo-est': () => { E.estEditado = null; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
+    'guardar-est': () => guardarPerfilEstudiante(),
+    'perfil-desde-ficha': (a) => { const c = cursoActivo(); if (!c) return; E.cursoAbierto = c.id; E.estEditado = a; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
+    'borrar-est': () => {
+      const c = Almacen.obtener('cursos', E.cursoAbierto), est = c && c.estudiantes.find((x) => x.id === E.estEditado);
+      if (!est) return;
+      const n = ensayos().filter((en) => hojasDe(en, c)[est.id]).length;
+      E.confirmar = { texto: `¿Quitar a ${est.nombre} de ${c.nombre}?${n ? ` Sus hojas corregidas en ${n} ensayo${n === 1 ? '' : 's'} también se borran.` : ''}`, accion: async () => {
+        for (const en of ensayos()) {
+          const r = Almacen.obtener('resultados', idResultados(en.id, c.id));
+          if (r && r.hojas && r.hojas[est.id]) { const resto = { ...r.hojas }; delete resto[est.id]; await Almacen.guardar('resultados', idResultados(en.id, c.id), { ...r, hojas: resto }); }
+        }
+        c.estudiantes = c.estudiantes.filter((x) => x.id !== est.id);
+        await Almacen.guardar('cursos', c.id, c);
+        toast('Estudiante quitado'); E.estEditado = null; E.pantalla = 'curso-detalle'; render();
+      } };
+      render();
+    },
     'hojas-pdf-curso': () => generarHojas(Almacen.obtener('ensayos', document.getElementById('cd-ensayo').value), Almacen.obtener('cursos', E.cursoAbierto), 'pdf'),
     'hojas-tex-curso': () => generarHojas(Almacen.obtener('ensayos', document.getElementById('cd-ensayo').value), Almacen.obtener('cursos', E.cursoAbierto), 'tex'),
     'borrar-curso': () => {
@@ -1910,7 +2015,9 @@
 
   window.addEventListener('pagehide', apagarCamara);
 
-  // Cada vez que se abre la app parte sin ensayo ni curso elegidos
-  Almacen.iniciar().then(async () => { if (config().ensayo || config().curso) await fijarConfig({ ensayo: null, curso: null }); render(); }, () => render());
+  // Cada vez que se abre la app parte sin ensayo ni curso elegidos. Una recarga dentro de la misma sesión
+  // (por ejemplo, al actualizarse la app a mitad de una corrección) mantiene la elección.
+  const sesionNueva = (() => { try { if (sessionStorage.getItem('lector-sesion')) return false; sessionStorage.setItem('lector-sesion', '1'); } catch (e) { /* sin sessionStorage */ } return true; })();
+  Almacen.iniciar().then(async () => { if (sesionNueva && (config().ensayo || config().curso)) await fijarConfig({ ensayo: null, curso: null }); render(); }, () => render());
   render();
 })();
