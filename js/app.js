@@ -39,6 +39,7 @@
     ajustes: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M1 12h3M20 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>',
     bajar: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
     subir: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>',
+    drive: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M8 3h8l6 11H14z"/><path d="M8 3L2 14l4 7 6-11"/><path d="M6 21h12l4-7H10"/></svg>',
     galeria: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>',
     check: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>',
     alerta: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
@@ -354,6 +355,7 @@
     const hojas = hojasDe(ens, cur);
     const hechas = cur ? cur.estudiantes.filter((e) => hojas[e.id]).length : 0;
     const vivo = !!E.camara.stream;
+    if (Drive.configurado() && !Drive.cargado()) Drive.precargar().catch(() => {});
     return `<div class="pantalla sin-nav camara">
       ${(() => { const set = ensayosEnCorreccion(); return set.length > 1
         ? cabecera(`${set.length} ensayos en corrección`, cur ? `${cur.nombre} · ${set.map((e) => `${etiquetaEnsayo(e)}: ${cur.estudiantes.filter((x) => hojasDe(e, cur)[x.id]).length}/${cur.estudiantes.length}`).join(' · ')}` : '', 'inicio')
@@ -373,6 +375,7 @@
       </div>
       <input type="file" id="foto-camara" accept="image/*,.heic,.heif" capture="environment" class="oculto-visual" data-archivo="foto">
       <input type="file" id="foto-galeria" accept="image/*,.heic,.heif" multiple class="oculto-visual" data-archivo="foto">
+      <button class="desde-drive" data-accion="drive">${ICONO.drive}<span>Subir desde Google Drive</span></button>
       <div class="controles-camara">
         ${vivo ? `<div class="lado"><button class="interruptor" role="switch" aria-checked="${E.camara.auto}" data-accion="auto" aria-label="Captura automática"></button><span>Captura automática</span></div>
         <button class="disparador" data-accion="capturar" aria-label="Tomar foto"></button>` : `<div class="lado"></div><label class="disparador" for="foto-camara" aria-label="Tomar foto"></label>`}
@@ -2328,6 +2331,24 @@
     ficha: (a) => { E.estAbierto = a; E.pantalla = 'ficha'; render(); },
     auto: () => { E.camara.auto = !E.camara.auto; const b = document.querySelector('.interruptor'); if (b) b.setAttribute('aria-checked', E.camara.auto); },
     capturar: () => capturarVideo(),
+    drive: async () => {
+      if (!Drive.configurado()) { toast('Google Drive aún no está conectado. Mientras, toca "Subir fotos" y elige Drive en la lista.'); return; }
+      if (!navigator.onLine) { toast('Para subir desde Google Drive necesitas internet.'); return; }
+      if (!Drive.cargado()) {
+        toast('Preparando Google Drive…');
+        Drive.precargar().then(() => toast('Listo. Toca otra vez "Subir desde Google Drive".'))
+          .catch(() => toast('No pude conectar con Google Drive. Revisa el internet e intenta de nuevo.'));
+        return;
+      }
+      try {
+        const fotos = await Drive.elegirFotos((n) => toast(`Bajando ${n === 1 ? 'la foto' : n + ' fotos'} desde Drive…`));
+        if (fotos.length) leerArchivos(fotos);
+      } catch (e) {
+        const m = String((e && e.message) || '');
+        if (/popup_closed|cancel|access_denied/.test(m)) return;
+        toast(/popup_failed/.test(m) ? 'El navegador bloqueó la ventana de Google. Permite ventanas emergentes e intenta de nuevo.' : 'No pude traer las fotos desde Drive. Intenta de nuevo.');
+      }
+    },
     repetir: () => { E.revision = null; ir('camara'); },
     'omitir-hoja': async () => {
       const rev = E.revision; if (!rev) return;
