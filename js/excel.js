@@ -150,7 +150,7 @@ const Excel = (() => {
       XLSX.utils.book_append_sheet(libro, sh, nombre);
     };
     const R = A.resumen;
-    const conCortes = !!A.estandares, conTabla = Estad.tieneTabla(ensayo);
+    const conCortes = !!A.estandares, conTabla = Estad.tieneTabla(ensayo), conSimce = Estad.tieneSimce(ensayo);
     const nt = (n) => (n == null ? '' : n);
     agregar('Resumen', [
       ['Ensayo', ensayo.nombre], ['Asignatura', ensayo.asignatura || ''], ['Curso', curso.nombre], ['Fecha', ensayo.fecha || ''],
@@ -162,18 +162,19 @@ const Excel = (() => {
       [`Nota promedio (exigencia ${pct(Estad.conf.escala.exigencia)}%)`, nt(R.notaMedia)],
       ['Estudiantes que aprueban', R.aprobados], ['% que aprueba', R.corregidas ? pct(R.aprobados / R.corregidas) : ''],
       ...(conTabla ? [['Puntaje PAES estimado promedio', R.puntajeMedia], ['Puntaje PAES estimado mínimo', R.puntajeMin], ['Puntaje PAES estimado máximo', R.puntajeMax]] : []),
+      ...(conSimce ? [['Puntaje SIMCE estimado promedio', nt(R.simceMedia)], ['Puntaje SIMCE estimado mínimo', nt(R.simceMin)], ['Puntaje SIMCE estimado máximo', nt(R.simceMax)]] : []),
       [],
       ['Tramo', 'Criterio', 'Estudiantes'], ...A.tramos.map((t) => [t.nombre, t.texto, t.n]),
       ...(conCortes ? [[], ['Estándar (estimado)', 'Desde % de logro', 'Estudiantes'],
         ...A.estandares.map((s, i) => [s.nombre, i === 0 ? 0 : pct(i === 1 ? ensayo.cortes.elemental : ensayo.cortes.adecuado), s.n])] : []),
     ], [34, 30, 12]);
     agregar('Resultados', [
-      ['N° lista', 'Estudiante', 'RUT', 'Correctas', 'Incorrectas', 'Omitidas', '% logro', 'Nota', 'Tramo', ...(conCortes ? ['Estándar (est.)'] : []), ...(conTabla ? ['Puntaje (est.)'] : []), 'Lugar'],
+      ['N° lista', 'Estudiante', 'RUT', 'Correctas', 'Incorrectas', 'Omitidas', '% logro', 'Nota', 'Tramo', ...(conCortes ? ['Estándar (est.)'] : []), ...(conTabla ? ['Puntaje (est.)'] : []), ...(conSimce ? ['Puntaje SIMCE (est.)'] : []), 'Lugar'],
       ...A.estudiantes.map((x) => x.corregida
         ? [x.e.lista, x.e.nombre, x.e.rut || '', x.correctas, x.incorrectas, x.omitidas, pct(x.logro), x.nota, Estad.tramoDe(x.logro).nombre,
-          ...(conCortes ? [x.estandar.nombre] : []), ...(conTabla ? [x.puntaje] : []),
+          ...(conCortes ? [x.estandar.nombre] : []), ...(conTabla ? [x.puntaje] : []), ...(conSimce ? [x.simce] : []),
           A.hechas.filter((y) => y.logro > x.logro).length + 1]
-        : [x.e.lista, x.e.nombre, x.e.rut || '', '', '', '', '', '', 'Sin hoja', ...(conCortes ? [''] : []), ...(conTabla ? [''] : []), '']),
+        : [x.e.lista, x.e.nombre, x.e.rut || '', '', '', '', '', '', 'Sin hoja', ...(conCortes ? [''] : []), ...(conTabla ? [''] : []), ...(conSimce ? [''] : []), '']),
     ], [9, 34, 14, 10, 11, 10, 9, 7, 8, 14, 13, 7]);
     agregar('Respuestas', [
       ['N° lista', 'Estudiante', ...ensayo.preguntas.map((p) => 'P' + p.n)],
@@ -235,16 +236,16 @@ const Excel = (() => {
   function exportarNivel(ensayo, N, nombreNivel, paralelos, HN) {
     const libro = XLSX.utils.book_new();
     const cs = N.porCurso, NA = N.A;
-    const conCortes = !!NA.estandares, conTabla = Estad.tieneTabla(ensayo);
+    const conCortes = !!NA.estandares, conTabla = Estad.tieneTabla(ensayo), conSimce = Estad.tieneSimce(ensayo);
     const fila = (nombre, A) => {
       const R = A.resumen;
       return [nombre, R.corregidas, R.total, pct(R.media), pct(R.mediana), pct(R.desviacion), R.notaMedia, R.corregidas ? pct(R.aprobados / R.corregidas) : '',
-        ...(conCortes ? A.estandares.map((s) => s.n).concat([pct(R.adecuado)]) : []), ...(conTabla ? [R.puntajeMedia] : [])];
+        ...(conCortes ? A.estandares.map((s) => s.n).concat([pct(R.adecuado)]) : []), ...(conTabla ? [R.puntajeMedia] : []), ...(conSimce ? [R.simceMedia] : [])];
     };
     hojaEn(libro, 'Paralelos', [
       ['Ensayo', ensayo.nombre], ['Nivel', nombreNivel], [],
       ['Curso', 'Hojas', 'Estudiantes', '% logro', '% mediana', 'Desv. estándar', 'Nota promedio', '% aprueba',
-        ...(conCortes ? ['Insuficiente', 'Elemental', 'Adecuado', '% Adecuado'] : []), ...(conTabla ? ['Puntaje promedio (est.)'] : [])],
+        ...(conCortes ? ['Insuficiente', 'Elemental', 'Adecuado', '% Adecuado'] : []), ...(conTabla ? ['Puntaje promedio (est.)'] : []), ...(conSimce ? ['Puntaje SIMCE promedio (est.)'] : [])],
       ...cs.map((x) => fila(x.curso.nombre, x.A)), fila(nombreNivel.toUpperCase(), NA),
     ], [22, 8, 11, 9, 10, 13, 13, 10]);
     const porGrupo = (campo) => {
@@ -275,7 +276,7 @@ const Excel = (() => {
       ['Nivel', 'Asignatura', 'Ensayos', 'Último ensayo', '% logro', 'Nota promedio', '% Adecuado (est.)', 'Puntaje promedio (est.)', `Estudiantes bajo ${pct(Estad.conf.umbrales.riesgo)}%`, 'Logro por ensayo'],
       ...filas.map((f) => {
         const R = f.ultimo.A.resumen;
-        return [f.nivel, f.grupo, f.ensayos, f.ultimo.ensayo.nombre, pct(R.media), R.notaMedia, R.adecuado == null ? '' : pct(R.adecuado), R.puntajeMedia == null ? '' : R.puntajeMedia, f.bajo, f.serie.map((v) => pct(v)).join(' → ')];
+        return [f.nivel, f.grupo, f.ensayos, f.ultimo.ensayo.nombre, pct(R.media), R.notaMedia, R.adecuado == null ? '' : pct(R.adecuado), R.puntajeMedia != null ? R.puntajeMedia : R.simceMedia != null ? `${R.simceMedia} (SIMCE)` : '', f.bajo, f.serie.map((v) => pct(v)).join(' → ')];
       }),
     ], [14, 30, 9, 40, 9, 13, 16, 20, 18, 30]);
     return libroABlob(libro);

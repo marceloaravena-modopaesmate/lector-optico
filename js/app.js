@@ -274,9 +274,19 @@
           <label class="oculto-visual" for="sel-curso">Curso</label>
           <select id="sel-curso" data-cambio="curso">${cursos().map((c) => `<option value="${h(c.id)}" ${c.id === cur.id ? 'selected' : ''}>${h(c.nombre)}</option>`).join('')}</select>
         </div>
-        ${ensayos().length > 1 ? `<div class="corregir-tambien"><span class="etiqueta">También corrijo en esta sesión</span>
-          <div class="filtros">${ensayos().filter((e) => e.id !== ens.id).map((e) => `<button data-accion="extra-ensayo" data-a="${h(e.id)}" aria-pressed="${ensayosEnCorreccion().some((x) => x.id === e.id)}">${h(e.nombre)}</button>`).join('')}</div>
-          ${ensayosEnCorreccion().length > 1 ? '<span class="nota">Las hojas con QR se guardan solas en su ensayo. En las hojas sin QR eliges el ensayo al revisarlas.</span>' : ''}</div>` : ''}
+        ${ensayos().length > 1 ? (() => {
+          // La lista de otros ensayos queda oculta: solo se ven los que ya elegiste, y el resto al tocar "Corregir otro ensayo"
+          const extras = ensayosEnCorreccion().filter((e) => e.id !== ens.id);
+          const verTodos = !!E.verExtras;
+          const lista = (verTodos ? ensayos().filter((e) => e.id !== ens.id) : extras);
+          const boton = verTodos
+            ? '<button class="btn" style="min-height:34px;border:0;background:none;align-self:flex-start;padding-left:0" data-accion="ver-extras">Ocultar la lista</button>'
+            : `<button class="btn" style="min-height:34px;border:0;background:none;align-self:flex-start;padding-left:0" data-accion="ver-extras">${ICONO.mas || '+'} ${extras.length ? 'Agregar otro ensayo' : 'Corregir otro ensayo en esta sesión'}</button>`;
+          return `<div class="corregir-tambien">${lista.length ? `<span class="etiqueta">También corrijo en esta sesión</span>
+          <div class="filtros">${lista.map((e) => `<button data-accion="extra-ensayo" data-a="${h(e.id)}" aria-pressed="${extras.some((x) => x.id === e.id)}">${h(e.nombre)}</button>`).join('')}</div>
+          ${extras.length ? '<span class="nota">Las hojas con QR se guardan solas en su ensayo. En las hojas sin QR eliges el ensayo al revisarlas.</span>' : ''}` : ''}
+          ${boton}</div>`;
+        })() : ''}
       </section>`;
     }
     let recientes = '';
@@ -576,6 +586,15 @@
           <label class="campo" for="e-elemental">Elemental desde (%)<input id="e-elemental" data-campo="cortes.elemental" inputmode="decimal" value="${pc(e.cortes && e.cortes.elemental)}" placeholder="Ej.: 45"></label>
           <label class="campo" for="e-adecuado">Adecuado desde (%)<input id="e-adecuado" data-campo="cortes.adecuado" inputmode="decimal" value="${pc(e.cortes && e.cortes.adecuado)}" placeholder="Ej.: 70"></label>
         </div>
+        ${(() => {
+          const sug = Estad.cortesSimceSugeridos(e), ps = e.puntajesSimce || {};
+          return `<span class="etiqueta" style="margin-top:4px">Puntaje SIMCE estimado</span>
+        <span style="font-size:14px;color:var(--texto-2)">Cada estudiante recibe un puntaje en la escala SIMCE (100 a 400). Con los cortes de arriba, el puntaje calza con el estándar: quien llega al corte de Adecuado obtiene el puntaje de corte de Adecuado. ${sug.sugerido ? `Para ${h(e.nivel || '')} se sugieren ${sug.elemental} y ${sug.adecuado} puntos.` : 'Si no completas los puntajes de corte se usan 250 y 300; revisa los de tu nivel y asignatura en el informe de la Agencia de Calidad.'}${Estad.cortesDe(e) ? '' : ' Sin cortes de %, el puntaje va en línea recta: 50 % de logro equivale a 250 puntos.'}</span>
+        <div class="dos">
+          <label class="campo" for="e-simce-el">Puntaje de corte Elemental<input id="e-simce-el" data-campo="puntajesSimce.elemental" inputmode="numeric" value="${ps.elemental == null ? '' : ps.elemental}" placeholder="${sug.elemental}"></label>
+          <label class="campo" for="e-simce-ad">Puntaje de corte Adecuado<input id="e-simce-ad" data-campo="puntajesSimce.adecuado" inputmode="numeric" value="${ps.adecuado == null ? '' : ps.adecuado}" placeholder="${sug.adecuado}"></label>
+        </div>`;
+        })()}
         <span class="etiqueta" style="margin-top:4px">Referencia oficial (opcional)</span>
         <div class="dos">
           <label class="campo" for="e-ref1">% Adecuado del colegio en el SIMCE<input id="e-ref1" data-campo="referencia.colegio" inputmode="decimal" value="${pc(ref.colegio)}"></label>
@@ -834,13 +853,14 @@
   }
   // Cifra de estándar o puntaje para un resumen
   function cifraConversion(ens, R) {
+    if (Estad.tieneSimce(ens) && R.simceMedia != null) return `<div class="tarjeta"><span>Puntaje SIMCE <span class="estimado">est.</span></span><b class="num">${R.simceMedia}</b><small class="num">${R.adecuado != null ? `${pct(R.adecuado)} en Adecuado` : `rango ${R.simceMin}–${R.simceMax}`}</small></div>`;
     if (Estad.cortesDe(ens) && R.adecuado != null) return `<div class="tarjeta"><span>En Adecuado <span class="estimado">est.</span></span><b class="num">${pct(R.adecuado)}</b><small>estándar estimado</small></div>`;
     if (Estad.tieneTabla(ens) && R.puntajeMedia != null) return `<div class="tarjeta"><span>Puntaje PAES <span class="estimado">est.</span></span><b class="num">${R.puntajeMedia}</b><small class="num">rango ${R.puntajeMin}–${R.puntajeMax}</small></div>`;
     return `<div class="tarjeta"><span>Desv. estándar</span><b class="num">${Math.round(R.desviacion * 100)}</b><small>puntos de logro</small></div>`;
   }
   const partesEst = (A) => A.estandares.map((s) => ({ nombre: s.nombre, n: s.n }));
   const leyendaEstandares = `<div class="leyenda-graf">${Estad.ESTANDARES.map((s, i) => `<span><i style="background:var(--tramo-${i + 1})"></i>${s.nombre}</span>`).join('')}</div>`;
-  const conversionDe = (x) => [x.estandar ? x.estandar.nombre : '', x.puntaje != null ? x.puntaje + ' pts.' : ''].filter(Boolean).join(' · ');
+  const conversionDe = (x) => [x.estandar ? x.estandar.nombre : '', x.puntaje != null ? x.puntaje + ' pts.' : '', x.simce != null ? x.simce + ' pts. SIMCE' : ''].filter(Boolean).join(' · ');
 
   function pEstadisticas() {
     const ens = ensayoActivo(), cur = cursoActivo();
@@ -946,10 +966,11 @@
     }
     const NA = N.A, cs = N.porCurso.map((x) => ({ ...x, nombre: x.curso.nombre, color: Graficos.colorCurso(x.idx) }));
     const conv = Estad.cortesDe(ens) ? 'adecuado' : Estad.tieneTabla(ens) ? 'puntaje' : null;
-    const celdaConv = (R) => (conv === 'adecuado' ? `<td class="num">${pct(R.adecuado)}</td>` : conv === 'puntaje' ? `<td class="num">${R.puntajeMedia}</td>` : '');
-    const tabla = `<div class="tabla-mini"><table><thead><tr><th>Curso</th><th class="num">Hojas</th><th class="num">Logro</th><th class="num">Nota</th><th class="num">Aprueban</th>${conv === 'adecuado' ? '<th class="num">Adecuado</th>' : conv === 'puntaje' ? '<th class="num">Puntaje</th>' : ''}</tr></thead><tbody>
+    const conSimce = Estad.tieneSimce(ens);
+    const celdaConv = (R) => (conv === 'adecuado' ? `<td class="num">${pct(R.adecuado)}</td>` : conv === 'puntaje' ? `<td class="num">${R.puntajeMedia}</td>` : '') + (conSimce ? `<td class="num">${R.simceMedia == null ? '–' : R.simceMedia}</td>` : '');
+    const tabla = `<div class="tabla-mini"><table><thead><tr><th>Curso</th><th class="num">Hojas</th><th class="num">Logro</th><th class="num">Nota</th><th class="num">Aprueban</th>${conv === 'adecuado' ? '<th class="num">Adecuado</th>' : conv === 'puntaje' ? '<th class="num">Puntaje</th>' : ''}${conSimce ? '<th class="num">SIMCE</th>' : ''}</tr></thead><tbody>
       ${cs.map((x) => { const R = x.A.resumen; return `<tr><td><b style="color:var(--texto)"><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${x.color};margin-right:6px"></i>${h(x.nombre)}</b></td><td class="num">${R.corregidas}/${R.total}</td><td class="num">${pct(R.media)}</td><td class="num">${notaTx(R.notaMedia)}</td><td class="num">${pct(R.aprobados / R.corregidas)}</td>${celdaConv(R)}</tr>`; }).join('')}
-      <tr><td><b>${h(nv)}</b></td><td class="num">${NA.resumen.corregidas}</td><td class="num"><b>${pct(NA.resumen.media)}</b></td><td class="num"><b>${notaTx(NA.resumen.notaMedia)}</b></td><td class="num"><b>${pct(NA.resumen.aprobados / NA.resumen.corregidas)}</b></td>${conv ? celdaConv(NA.resumen).replace('<td class="num">', '<td class="num" style="font-weight:700">') : ''}</tr>
+      <tr><td><b>${h(nv)}</b></td><td class="num">${NA.resumen.corregidas}</td><td class="num"><b>${pct(NA.resumen.media)}</b></td><td class="num"><b>${notaTx(NA.resumen.notaMedia)}</b></td><td class="num"><b>${pct(NA.resumen.aprobados / NA.resumen.corregidas)}</b></td>${conv || conSimce ? celdaConv(NA.resumen).replaceAll('<td class="num">', '<td class="num" style="font-weight:700">') : ''}</tr>
       </tbody></table></div>`;
     const caja = Graficos.cajaPuntos(cs.map((x) => ({
       nombre: x.nombre, color: x.color, media: x.A.resumen.media, mediana: x.A.resumen.mediana, q1: x.A.resumen.q1, q3: x.A.resumen.q3,
@@ -1055,7 +1076,8 @@
     const serie = (H.estudiantes.find((s) => s.e.id === P.e.id) || { serie: [] }).serie;
     const al = Estad.alertas(A, H).find((a) => a.x.e.id === P.e.id);
     const falladas = A.preguntas.filter((p) => !P.aciertos[p.i]);
-    const cuarta = P.estandar ? `<div class="tarjeta"><span>Estándar <span class="estimado">est.</span></span><b style="font-size:18px">${P.estandar.nombre}</b></div>`
+    const cuarta = P.simce != null ? `<div class="tarjeta"><span>Puntaje SIMCE <span class="estimado">est.</span></span><b class="num">${P.simce}</b>${P.estandar ? `<small>${P.estandar.nombre}</small>` : ''}</div>`
+      : P.estandar ? `<div class="tarjeta"><span>Estándar <span class="estimado">est.</span></span><b style="font-size:18px">${P.estandar.nombre}</b></div>`
       : P.puntaje != null ? `<div class="tarjeta"><span>Puntaje <span class="estimado">est.</span></span><b class="num">${P.puntaje}</b></div>`
         : `<div class="tarjeta"><span>Tramo</span><b style="font-size:18px">${P.tramo.nombre}</b></div>`;
     const leyenda = `<div class="leyenda-graf"><span><i style="background:var(--serie);border-radius:50%"></i>${h(corto(P.e.nombre))}</span><span><i style="background:var(--texto);width:3px"></i>Su curso</span>${conNivel ? `<span><i style="background:var(--distractor);width:3px"></i>${h(nivelDe(cur).nivel)}</span>` : ''}</div>`;
@@ -2130,7 +2152,7 @@
         const [obj, campo] = k.split('.');
         const v = parseFloat(el.value.replace(',', '.'));
         e[obj] = { ...(e[obj] || {}) };
-        const comoPuntaje = obj === 'referencia' && e.tipo === 'PAES';
+        const comoPuntaje = (obj === 'referencia' && e.tipo === 'PAES') || obj === 'puntajesSimce';
         if (isNaN(v)) delete e[obj][campo]; else e[obj][campo] = comoPuntaje ? v : v / 100;
         if (!Object.keys(e[obj]).length) delete e[obj];
       } else if (k === 'clave') {
@@ -2154,7 +2176,9 @@
       if (id) e.tablaPaes = Estad.TABLAS_PAES[id].puntajes.slice();
     }
     if (e.tipo !== 'PAES') delete e.tablaPaes;
-    if (e.tipo !== 'SIMCE') delete e.cortes;
+    if (e.tipo !== 'SIMCE') { delete e.cortes; delete e.puntajesSimce; }
+    if (e.puntajesSimce && (e.puntajesSimce.elemental == null) !== (e.puntajesSimce.adecuado == null)) { toast('Completa los dos puntajes de corte SIMCE, o deja ambos vacíos.'); return; }
+    if (e.puntajesSimce && e.puntajesSimce.elemental != null && !(e.puntajesSimce.elemental > Estad.SIMCE_MIN && e.puntajesSimce.elemental < e.puntajesSimce.adecuado && e.puntajesSimce.adecuado < Estad.SIMCE_MAX)) { toast('El puntaje de corte Elemental debe ser menor que el de Adecuado, ambos entre 100 y 400.'); return; }
     if (e.cortes && (e.cortes.elemental == null) !== (e.cortes.adecuado == null)) { toast('Completa los dos cortes de estándar, o deja ambos vacíos.'); return; }
     if (e.cortes && e.cortes.elemental != null && !(e.cortes.elemental > 0 && e.cortes.elemental < e.cortes.adecuado && e.cortes.adecuado <= 1)) { toast('El corte de Elemental debe ser menor que el de Adecuado, ambos entre 1 y 100.'); return; }
     const malas = e.preguntas.filter((p) => 'ABCDE'.indexOf(p.clave) >= e.alternativas);
@@ -2462,9 +2486,11 @@
     'editar-est': (a) => { E.estEditado = a; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'nuevo-est': () => { E.estEditado = null; E.pantalla = 'perfil-est'; window.scrollTo(0, 0); render(); },
     'guardar-est': () => guardarPerfilEstudiante(),
+    'ver-extras': () => { E.verExtras = !E.verExtras; E.mantenerScroll = true; render(); },
     'extra-ensayo': async (a) => {
       const act = (config().ensayosExtra || []);
       await fijarConfig({ ensayosExtra: act.includes(a) ? act.filter((x) => x !== a) : [...act, a] });
+      if (!act.includes(a)) E.verExtras = false;
       E.mantenerScroll = true; render();
     },
     'cerrar-correo': () => { E.correoListo = null; E.mantenerScroll = true; render(); },

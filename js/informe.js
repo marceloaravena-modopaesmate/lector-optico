@@ -882,6 +882,7 @@ const Informe = (() => {
       { etiqueta: 'Nivel Medio o Alto', valor: pct((R.corregidas - A.hechas.filter(enBajo).length) / (R.corregidas || 1)), detalle: `${R.corregidas - A.hechas.filter(enBajo).length} de ${R.corregidas}` },
     ];
     if (R.puntajeMedia != null) tarjetas.push({ etiqueta: 'Puntaje PAES (est.)', valor: R.puntajeMedia, detalle: `rango ${R.puntajeMin}–${R.puntajeMax}` });
+    else if (R.simceMedia != null) tarjetas.push({ etiqueta: 'Puntaje SIMCE (est.)', valor: R.simceMedia, detalle: R.adecuado != null ? `${pct(R.adecuado)} en Adecuado` : `rango ${R.simceMin}–${R.simceMax}` });
     else if (R.adecuado != null) tarjetas.push({ etiqueta: 'En Adecuado (est.)', valor: pct(R.adecuado), detalle: 'estándar estimado' });
     P.y += 2; cifras(P, tarjetas);
 
@@ -1004,15 +1005,16 @@ const Informe = (() => {
     const conEst = !!A.estandares;
     const cols = [{ titulo: 'N°', ancho: 10 }, { titulo: 'Estudiante', ancho: pocos ? 82 : 64 }, { titulo: 'Correctas', ancho: 20, der: true }, { titulo: 'Logro', ancho: 16, der: true }, { titulo: 'Nivel', ancho: 14, der: false }];
     if (!pocos) cols.push({ titulo: 'Percentil', ancho: 18, der: true });
-    cols.push(conPuntaje ? { titulo: 'Puntaje est.', ancho: W - 142, der: true } : conEst ? { titulo: 'Estándar est.', ancho: W - 142 } : { titulo: 'Lugar', ancho: W - 142, der: true });
+    const conSimce = R.simceMedia != null;
+    cols.push(conPuntaje ? { titulo: 'Puntaje est.', ancho: W - 142, der: true } : conSimce ? { titulo: conEst ? 'SIMCE · estándar' : 'Puntaje SIMCE', ancho: W - 142 } : conEst ? { titulo: 'Estándar est.', ancho: W - 142 } : { titulo: 'Lugar', ancho: W - 142, der: true });
     const percentil = (x) => { const ls = A.hechas.map((y) => y.logro); return Math.round(((ls.filter((v) => v < x.logro).length + ls.filter((v) => v === x.logro).length / 2) / ls.length) * 100); };
     const sinHoja = A.estudiantes.filter((x) => !x.corregida);
     tabla(P, cols, A.estudiantes.filter((x) => x.corregida || sinHoja.length <= 3).map((x) => ({
       celdas: x.corregida ? [x.e.lista, x.e.nombre, `${x.correctas}/${A.n}`, pct(x.logro), Estad.tramoDe(x.logro).nombre, ...(pocos ? [] : [percentil(x)]),
-        conPuntaje ? x.puntaje : conEst ? x.estandar.nombre : `${A.hechas.filter((y) => y.logro > x.logro).length + 1}°`] : [x.e.lista, x.e.nombre, 'sin hoja', '', '', '', ''],
+        conPuntaje ? x.puntaje : conSimce ? `${x.simce}${conEst ? ' · ' + x.estandar.nombre : ''}` : conEst ? x.estandar.nombre : `${A.hechas.filter((y) => y.logro > x.logro).length + 1}°`] : [x.e.lista, x.e.nombre, 'sin hoja', '', '', '', ''],
     })));
     if (sinHoja.length > 3) parrafo(P, `Sin hoja corregida (${sinHoja.length}): ${lista(sinHoja.map((x) => `${x.e.lista}. ${nombreCorto(x.e.nombre)}`))}.`, { tam: 9 });
-    parrafo(P, `${pocos ? '' : 'El percentil indica qué porcentaje del curso obtuvo un resultado menor.'}${conPuntaje ? ' El puntaje se estima con la tabla de conversión del ensayo.' : conEst ? ' El estándar se estima con los cortes del ensayo.' : ''}`, { color: C.texto2, tam: 8.5 });
+    parrafo(P, `${pocos ? '' : 'El percentil indica qué porcentaje del curso obtuvo un resultado menor.'}${conPuntaje ? ' El puntaje se estima con la tabla de conversión del ensayo.' : conSimce ? ` El puntaje SIMCE se estima desde el % de logro${conEst ? ' y calza con el estándar estimado con los cortes del ensayo' : ''}; no es el puntaje oficial.` : conEst ? ' El estándar se estima con los cortes del ensayo.' : ''}`, { color: C.texto2, tam: 8.5 });
     tablaIndividual(P, ctx);
     seccion(P, ns++, 'Plan de acción', 60);
     titulo(P, 'Acciones sugeridas', 0, 50);
@@ -1065,12 +1067,12 @@ const Informe = (() => {
       parrafo(P, t, { color: C.texto2, tam: 10 });
     }
 
-    notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!A.estandares });
+    notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!A.estandares, ens });
   }
 
   // ---------- Varios ensayos ----------
   const etiquetaEns = (e) => (e.fecha ? e.fecha.slice(0, 5) : e.nombre.slice(0, 10));
-  const conversionDe = (x) => (x.puntaje != null ? `${x.puntaje} pts.` : x.estandar ? x.estandar.nombre : '');
+  const conversionDe = (x) => (x.puntaje != null ? `${x.puntaje} pts.` : x.simce != null ? `${x.simce} SIMCE${x.estandar ? ' · ' + x.estandar.nombre : ''}` : x.estandar ? x.estandar.nombre : '');
   // Agrupa los ensayos elegidos por asignatura, conservando el orden por fecha
   function porAsignatura(sel) {
     const g = new Map();
@@ -1112,6 +1114,7 @@ const Informe = (() => {
       { etiqueta: 'Nivel Medio o Alto', valor: pct(u.A.hechas.filter((x) => !enBajo(x)).length / (R.corregidas || 1)), detalle: `${u.A.hechas.filter((x) => !enBajo(x)).length} de ${R.corregidas}` },
     ];
     if (R.puntajeMedia != null) t.push({ etiqueta: 'Puntaje PAES (est.)', valor: R.puntajeMedia, detalle: prev && prev.A.resumen.puntajeMedia != null ? `antes: ${prev.A.resumen.puntajeMedia}` : `rango ${R.puntajeMin}–${R.puntajeMax}` });
+    else if (R.simceMedia != null) t.push({ etiqueta: 'Puntaje SIMCE (est.)', valor: R.simceMedia, detalle: prev && prev.A.resumen.simceMedia != null ? `antes: ${prev.A.resumen.simceMedia}` : R.adecuado != null ? `${pct(R.adecuado)} en Adecuado` : `rango ${R.simceMin}–${R.simceMax}` });
     else if (R.adecuado != null) t.push({ etiqueta: 'En Adecuado (est.)', valor: pct(R.adecuado), detalle: prev && prev.A.resumen.adecuado != null ? `antes: ${pct(prev.A.resumen.adecuado)}` : '' });
     cifras(P, t);
     const ejes = u.A.porEje.filter((e) => e.nombre !== 'Sin dato').slice().sort((a, b) => b.logro - a.logro);
@@ -1219,6 +1222,7 @@ const Informe = (() => {
       { etiqueta: 'Logro', valor: pct(x.logro), detalle: `promedio del curso: ${pct(A.resumen.media)}` },
     ];
     if (x.puntaje != null) t.push({ etiqueta: 'Puntaje PAES (est.)', valor: x.puntaje, detalle: `promedio del curso: ${A.resumen.puntajeMedia}` });
+    else if (x.simce != null) t.push({ etiqueta: 'Puntaje SIMCE (est.)', valor: x.simce, detalle: x.estandar ? `estándar ${x.estandar.nombre} · curso: ${A.resumen.simceMedia}` : `promedio del curso: ${A.resumen.simceMedia}` });
     else if (x.estandar) t.push({ etiqueta: 'Estándar (est.)', valor: x.estandar.nombre, detalle: 'según cortes del ensayo' });
     else t.push({ etiqueta: 'Nivel de desempeño', valor: Estad.tramoDe(x.logro).nombre, detalle: `Medio desde ${pct(Estad.conf.niveles.medio)}` });
     if (!familia && !pocos) t.push({ etiqueta: 'Lugar en el curso', valor: `${T.posicion}° de ${A.hechas.length}`, detalle: `percentil ${T.percentil}` });
@@ -1235,7 +1239,7 @@ const Informe = (() => {
     const de = (c) => `${c.bien} de ${c.total}`;
     const d = x.logro - A.resumen.media;
     const frases = [];
-    frases.push(`${pila} contestó bien ${x.correctas} de ${A.n} preguntas (${pct(x.logro)})${x.puntaje != null ? `, equivalente a unos ${x.puntaje} puntos PAES estimados` : x.estandar ? `, nivel ${x.estandar.nombre} según los cortes del ensayo` : `, nivel ${Estad.tramoDe(x.logro).nombre} de desempeño`}.`);
+    frases.push(`${pila} contestó bien ${x.correctas} de ${A.n} preguntas (${pct(x.logro)})${x.puntaje != null ? `, equivalente a unos ${x.puntaje} puntos PAES estimados` : x.simce != null ? `, equivalente a unos ${x.simce} puntos SIMCE estimados${x.estandar ? ` (nivel ${x.estandar.nombre})` : ''}` : x.estandar ? `, nivel ${x.estandar.nombre} según los cortes del ensayo` : `, nivel ${Estad.tramoDe(x.logro).nombre} de desempeño`}.`);
     let comp = Math.abs(d) < 0.02 ? `Está en el promedio del curso (${pct(A.resumen.media)})` : `Son ${pts(d)} ${d > 0 ? 'sobre' : 'bajo'} el promedio del curso (${pct(A.resumen.media)})`;
     if (!familia && !pocos) comp += ` y queda en el lugar ${T.posicion} de ${A.hechas.length}`;
     const serie = H ? (H.estudiantes.find((s) => s.e.id === x.e.id) || { serie: [] }).serie : [];
@@ -1570,7 +1574,8 @@ const Informe = (() => {
     return out;
   }
 
-  function notaMetodologica(P, { consolidado = false, tieneTabla = false, tieneCortes = false } = {}) {
+  function notaMetodologica(P, { consolidado = false, tieneTabla = false, tieneCortes = false, ens = null } = {}) {
+    const tieneSimce = Estad.tieneSimce(ens), simceCortes = tieneSimce ? Estad.cortesSimce(ens) : null;
     titulo(P, 'Metodología', 6, 40);
     const n = Estad.conf.niveles;
     const items = [
@@ -1579,7 +1584,8 @@ const Informe = (() => {
       'Desviación estándar y varianza son muestrales (dividen por n - 1). Los cuartiles se calculan por interpolación lineal, igual que CUARTIL.INC de Excel. La moda se informa solo si algún valor se repite.',
       `Niveles de desempeño: Bajo bajo ${pct(n.medio)}, Medio desde ${pct(n.medio)} y Alto desde ${pct(n.alto)} de logro. Son cortes configurables en Ajustes y no corresponden a los niveles oficiales de PAES ni de SIMCE.`,
       tieneTabla ? 'Puntaje PAES estimado: se obtiene con la tabla de conversión (de respuestas correctas a puntaje) cargada en el ensayo. No es el puntaje oficial del DEMRE.' : 'Este informe no estima puntajes PAES: el ensayo no tiene tabla de conversión cargada y la app no convierte porcentajes en puntajes por reglas arbitrarias.',
-      tieneCortes ? 'Estándares SIMCE estimados: se asignan con los cortes de logro que trae el ensayo. No es el puntaje SIMCE ni el estándar oficial de la Agencia de Calidad.' : null,
+      tieneCortes ? 'Estándares SIMCE estimados: se asignan con los cortes de logro que trae el ensayo. No es el estándar oficial de la Agencia de Calidad.' : null,
+      tieneSimce ? `Puntaje SIMCE estimado: conversión del % de logro a la escala SIMCE (100 a 400).${tieneCortes ? ` Pasa por los puntajes de corte de los estándares (${simceCortes.elemental} Elemental y ${simceCortes.adecuado} Adecuado), de modo que el puntaje y el estándar estimado coinciden.` : ' Sin cortes de estándar, la conversión es lineal: 50 % de logro equivale a 250 puntos.'} Es referencial: el SIMCE oficial usa un modelo (TRI) que un ensayo no replica.` : null,
       'Comparaciones entre cursos: solo entre cursos que rindieron el mismo ensayo. Las diferencias se expresan en puntos porcentuales (pp) y son descriptivas: no se aplicaron pruebas estadísticas. Con menos de 8 estudiantes los resultados son referenciales.',
       'Distractores: la explicación de un error aparece como hipótesis, salvo que el ensayo traiga el error asociado a cada alternativa.',
       consolidado ? 'Resultados acumulados: el logro global es la suma de respuestas correctas dividida por la suma de preguntas válidas de los ensayos elegidos (no es el promedio de los porcentajes). Cada ensayo se cuenta una vez. Los instrumentos distintos (por ejemplo, PAES M1 y M2) se informan por separado. Una diferencia entre ensayos puede deberse en parte a su distinta dificultad.' : null,
@@ -1593,6 +1599,7 @@ const Informe = (() => {
   function resumenTexto(ctxD) {
     const { porCurso, inst } = ctxD, R = inst.resumen, t = [];
     if (R.puntajeMedia != null) t.push(`El puntaje PAES promedio estimado es de ${R.puntajeMedia} puntos (mediana ${Math.round(R.dPuntaje.mediana)}), con resultados entre ${R.puntajeMin} y ${R.puntajeMax} puntos.`);
+    else if (R.simceMedia != null) t.push(`El puntaje SIMCE promedio estimado es de ${R.simceMedia} puntos (mediana ${Math.round(R.dSimce.mediana)}), con resultados entre ${R.simceMin} y ${R.simceMax} puntos${R.adecuado != null ? `; ${pct(R.adecuado)} de los estudiantes queda en el nivel Adecuado` : ''}.`);
     t.push(`En promedio, cada estudiante respondió bien ${dec1(R.dCorrectas.media)} de ${inst.n} preguntas (${pct(R.media)} de logro).`);
     if (R.corregidas) { const mm = inst.hechas.filter((x) => !enBajo(x)).length; t.push(`${mm} de ${R.corregidas} estudiantes (${pct(mm / R.corregidas)}) alcanzan el nivel Medio o Alto de desempeño.`); }
     if (porCurso.length >= 2) {
@@ -1862,7 +1869,7 @@ const Informe = (() => {
     seccion(P, ns++, 'Anexo técnico', 60);
     titulo(P, 'Indicadores estadísticos', 0, 60);
     tablaIndicadores(P, inst);
-    if (!sinNota) notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!inst.estandares });
+    if (!sinNota) notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!inst.estandares, ens });
     P.siguienteSeccion = ns;
   }
 
@@ -2297,6 +2304,7 @@ const Informe = (() => {
   function cifrasGrupo(A) {
     const R = A.resumen, out = [];
     if (R.puntajeMedia != null) out.push({ etiqueta: 'Puntaje promedio', valor: String(R.puntajeMedia), detalle: `mín. ${R.puntajeMin} · máx. ${R.puntajeMax}` });
+    else if (R.simceMedia != null) out.push({ etiqueta: 'Puntaje SIMCE (est.)', valor: String(R.simceMedia), detalle: `mín. ${R.simceMin} · máx. ${R.simceMax}` });
     out.push({ etiqueta: 'Logro promedio', valor: pct(R.media), detalle: `${dec1(R.dCorrectas.media)} de ${A.n} correctas` });
     if (R.corregidas) { const mm = A.hechas.filter((x) => !enBajo(x)).length; out.push({ etiqueta: 'Nivel Medio o Alto', valor: pct(mm / R.corregidas), detalle: `${mm} de ${R.corregidas} estudiantes` }); }
     if (R.adecuado != null && out.length < 4) out.push({ etiqueta: 'Nivel Adecuado', valor: pct(R.adecuado), detalle: 'estándar SIMCE estimado' });
@@ -2323,6 +2331,7 @@ const Informe = (() => {
       // Un solo ensayo: puntaje, logro y nivel en la portada
       const g = C2[0], x = g.ensayos[0].x, t = [];
       if (x.puntaje != null) t.push({ etiqueta: 'Puntaje PAES (est.)', valor: String(x.puntaje), detalle: g.nombre });
+      else if (x.simce != null) t.push({ etiqueta: 'Puntaje SIMCE (est.)', valor: String(x.simce), detalle: g.nombre });
       t.push({ etiqueta: 'Logro', valor: pct(g.logro), detalle: `${g.correctas} de ${g.preguntas} correctas` });
       t.push({ etiqueta: x.estandar ? 'Estándar (est.)' : 'Nivel de desempeño', valor: nivelDe(x), detalle: x.estandar ? 'según cortes del ensayo' : `Medio desde ${pct(Estad.conf.niveles.medio)}` });
       if (t.length < 4) t.push({ etiqueta: 'En blanco', valor: String(g.omisiones), detalle: 'sin responder' });
@@ -2367,12 +2376,13 @@ const Informe = (() => {
       seccion(P, gi + 1, C2.length > 1 ? g.nombre : `Tu resultado en ${g.nombre}`, 70);
       const tarjetas = g.cantidad === 1
         ? [...(x.puntaje != null && !ctxS.ejes ? [{ etiqueta: 'Puntaje PAES (est.)', valor: String(x.puntaje), detalle: 'con la tabla del ensayo' }] : []),
+          ...(x.simce != null && !ctxS.ejes ? [{ etiqueta: 'Puntaje SIMCE (est.)', valor: String(x.simce), detalle: 'referencial, no oficial' }] : []),
           { etiqueta: 'Logro', valor: pct(g.logro), detalle: `${g.correctas} de ${g.preguntas} correctas` },
           ...(!ctxS.ejes ? [{ etiqueta: x.estandar ? 'Estándar (est.)' : 'Nivel de desempeño', valor: nivelDe(x), detalle: x.estandar ? 'según cortes del ensayo' : `Medio desde ${pct(Estad.conf.niveles.medio)}` }] : []),
           { etiqueta: 'En blanco', valor: String(g.omisiones), detalle: 'sin responder' }]
         : [{ etiqueta: 'Resultado global', valor: pct(g.logro), detalle: `${g.correctas} de ${g.preguntas} correctas` },
           { etiqueta: 'Ensayos', valor: String(g.cantidad), detalle: `${g.preguntas} preguntas en total` },
-          { etiqueta: 'Último ensayo', valor: pct(ult.logro), detalle: x.puntaje != null && !ctxS.ejes ? `${x.puntaje} pts. estimados` : ens.nombre },
+          { etiqueta: 'Último ensayo', valor: pct(ult.logro), detalle: x.puntaje != null && !ctxS.ejes ? `${x.puntaje} pts. estimados` : x.simce != null && !ctxS.ejes ? `${x.simce} pts. SIMCE estimados` : ens.nombre },
           { etiqueta: 'En blanco', valor: String(g.omisiones), detalle: 'sin responder' }];
       cifras(P, tarjetas.slice(0, 4));
       const L = lecturaDocente(g, est, 'estudiante');
@@ -2450,6 +2460,7 @@ const Informe = (() => {
         { etiqueta: 'Respuestas correctas', valor: `${g.correctas} de ${g.preguntas}`, detalle: g.omisiones ? `${g.omisiones} sin responder` : 'respondió todas' },
         { etiqueta: 'Porcentaje de logro', valor: pct(g.logro), detalle: g.cantidad > 1 ? 'de todos los ensayos juntos' : ens.nombre },
         g.cantidad === 1 && x.puntaje != null && !ctxS.ejes ? { etiqueta: 'Puntaje PAES (est.)', valor: String(x.puntaje), detalle: 'referencial, no oficial' }
+          : g.cantidad === 1 && x.simce != null && !ctxS.ejes ? { etiqueta: 'Puntaje SIMCE (est.)', valor: String(x.simce), detalle: x.estandar ? `estándar ${x.estandar.nombre} · referencial` : 'referencial, no oficial' }
           : g.cantidad === 1 && !ctxS.ejes ? { etiqueta: x.estandar ? 'Estándar (est.)' : 'Nivel de desempeño', valor: nivelDe(x), detalle: x.estandar ? 'estimado' : `Medio desde ${pct(Estad.conf.niveles.medio)}` }
             : { etiqueta: 'Ensayos considerados', valor: String(g.cantidad), detalle: g.nombre },
         { etiqueta: 'Temáticas evaluadas', valor: String(ejes.length), detalle: lista(ejes.map((o) => o.nombre)) },
@@ -2488,7 +2499,7 @@ const Informe = (() => {
     vinetas(P, [
       'Ensayo: prueba de práctica con el formato de la evaluación oficial. Sirve para orientar el estudio; no es un resultado oficial.',
       'Porcentaje de logro: proporción de preguntas respondidas correctamente.',
-      conP ? 'Puntaje PAES estimado: conversión del resultado a la escala de la PAES (100 a 1000) con la tabla del ensayo. Es referencial.' : 'Nivel de desempeño: Bajo, Medio o Alto según el porcentaje de logro. En SIMCE se estima además el estándar de aprendizaje (Insuficiente, Elemental o Adecuado).',
+      conP ? 'Puntaje PAES estimado: conversión del resultado a la escala de la PAES (100 a 1000) con la tabla del ensayo. Es referencial.' : C2.some((g) => g.ensayos.some((e) => e.x.simce != null)) ? 'Puntaje SIMCE estimado: conversión del porcentaje de logro a la escala SIMCE (100 a 400), donde 250 es el promedio nacional. Es referencial, no es el puntaje oficial.' : 'Nivel de desempeño: Bajo, Medio o Alto según el porcentaje de logro. En SIMCE se estima además el estándar de aprendizaje (Insuficiente, Elemental o Adecuado).',
       'Temática o eje: grupo de contenidos de la asignatura, por ejemplo números o geometría.',
       'Habilidad: lo que se pide hacer con el contenido, como resolver problemas, representar o argumentar.',
     ], { tam: 9 });
@@ -2606,7 +2617,7 @@ const Informe = (() => {
     nuevaPagina(P);
     seccion(P, ns++, 'Anexo técnico', 60);
     tablaIndicadores(P, inst);
-    notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!inst.estandares });
+    notaMetodologica(P, { tieneTabla: Estad.tieneTabla(ens), tieneCortes: !!inst.estandares, ens });
     indice(P); piePaginas(P); return P.doc.output('blob');
   }
 

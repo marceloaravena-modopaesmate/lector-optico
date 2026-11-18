@@ -176,6 +176,46 @@ const Estad = (() => {
     return t[Math.min(correctas, t.length - 1)];
   }
 
+  // Puntaje SIMCE estimado (escala de la Agencia: media nacional 250, desviación 50, rango aprox. 100 a 400).
+  // Puntajes de corte de los estándares por nivel y asignatura (referenciales: verifícalos en el informe de la Agencia).
+  const SIMCE_MIN = 100, SIMCE_MAX = 400;
+  const CORTES_SIMCE = [
+    { nivel: /^4/, asig: /lect|lengua/i, elemental: 241, adecuado: 284 },
+    { nivel: /^4/, asig: /matem/i, elemental: 245, adecuado: 295 },
+    { nivel: /^8/, asig: /lect|lengua/i, elemental: 244, adecuado: 292 },
+    { nivel: /^8/, asig: /matem/i, elemental: 247, adecuado: 297 },
+    { nivel: /^II\s/i, asig: /lect|lengua/i, elemental: 250, adecuado: 295 },
+    { nivel: /^II\s/i, asig: /matem/i, elemental: 245, adecuado: 320 },
+  ];
+  const CORTES_SIMCE_GENERAL = { elemental: 250, adecuado: 300 };
+  const tieneSimce = (ensayo) => !!(ensayo && ensayo.tipo === 'SIMCE');
+  // Puntajes de corte sugeridos según el nivel y la asignatura del ensayo
+  function cortesSimceSugeridos(ensayo) {
+    const nv = String((ensayo && ensayo.nivel) || '').trim(), as = String((ensayo && (ensayo.asignatura || ensayo.nombre)) || '');
+    const c = CORTES_SIMCE.find((x) => x.nivel.test(nv) && x.asig.test(as));
+    return c ? { elemental: c.elemental, adecuado: c.adecuado, sugerido: true } : { ...CORTES_SIMCE_GENERAL, sugerido: false };
+  }
+  // Puntajes de corte que usa el ensayo: los que escribió el docente o los sugeridos
+  function cortesSimce(ensayo) {
+    const p = ensayo && ensayo.puntajesSimce;
+    if (p && p.elemental > 0 && p.adecuado > p.elemental) return { elemental: +p.elemental, adecuado: +p.adecuado, propio: true };
+    return cortesSimceSugeridos(ensayo);
+  }
+  // Convierte el % de logro en puntaje SIMCE. Con cortes de % definidos, el puntaje calza con el estándar:
+  // 0 % → 100, corte Elemental → puntaje Elemental, corte Adecuado → puntaje Adecuado, 100 % → 400.
+  // Sin cortes de %, la conversión es lineal entre 100 y 400 (50 % de logro = 250, la media nacional).
+  function simceDe(logro, ensayo) {
+    if (!tieneSimce(ensayo)) return null;
+    const c = cortesDe(ensayo), p = cortesSimce(ensayo);
+    const puntos = c ? [[0, SIMCE_MIN], [c.elemental, p.elemental], [c.adecuado, p.adecuado], [1, SIMCE_MAX]] : [[0, SIMCE_MIN], [1, SIMCE_MAX]];
+    const l = Math.max(0, Math.min(1, logro));
+    for (let i = 1; i < puntos.length; i++) {
+      const [x0, y0] = puntos[i - 1], [x1, y1] = puntos[i];
+      if (l <= x1) return Math.round(x1 > x0 ? y0 + (y1 - y0) * (l - x0) / (x1 - x0) : y1);
+    }
+    return SIMCE_MAX;
+  }
+
   // Tablas de conversión PAES (n° de respuestas correctas → puntaje), sin contar las preguntas piloto
   const TABLAS_PAES = {
     m1: { nombre: 'Competencia Matemática 1 (M1)', buscar: /\bM1\b|matem[aá]tica\s*1/i, puntajes: [100, 173, 196, 216, 236, 255, 273, 290, 305, 318, 331, 345, 360, 375, 389, 399, 408, 417, 426, 438, 452, 467, 480, 490, 498, 504, 511, 519, 530, 543, 558, 571, 582, 590, 597, 603, 611, 622, 635, 650, 664, 676, 685, 694, 704, 716, 730, 746, 761, 775, 789, 804, 821, 840, 860, 880, 903, 927, 955, 986, 1000] },
@@ -241,7 +281,7 @@ const Estad = (() => {
       const logro = correctas / n;
       return {
         e, corregida: true, r, aciertos, correctas, omitidas, incorrectas: n - correctas - omitidas, logro,
-        nota: nota(logro), estandar: estandarDe(logro, ensayo), puntaje: puntajeDe(correctas, ensayo),
+        nota: nota(logro), estandar: estandarDe(logro, ensayo), puntaje: puntajeDe(correctas, ensayo), simce: simceDe(logro, ensayo),
       };
     });
     const hechas = estudiantes.filter((x) => x.corregida);
@@ -309,6 +349,7 @@ const Estad = (() => {
     const porTramo = tramos().map((t) => ({ ...t, n: hechas.filter((x) => tramoDe(x.logro).id === t.id).length }));
     const estandares = cortesDe(ensayo) ? ESTANDARES.map((s) => ({ ...s, n: hechas.filter((x) => x.estandar.id === s.id).length })) : null;
     const puntajes = tieneTabla(ensayo) ? hechas.map((x) => x.puntaje).filter((v) => v != null) : [];
+    const simces = tieneSimce(ensayo) ? hechas.map((x) => x.simce).filter((v) => v != null) : [];
 
     return {
       ensayo, curso, n, pilotos, letras, estudiantes, hechas, preguntas, porEje, porHabilidad, porContenido, porOA, matriz, histograma, histNotas, tramos: porTramo, estandares,
@@ -335,6 +376,10 @@ const Estad = (() => {
         puntajeMin: puntajes.length ? Math.min(...puntajes) : null,
         puntajeMax: puntajes.length ? Math.max(...puntajes) : null,
         adecuado: estandares && hechas.length ? estandares[2].n / hechas.length : null,
+        simceMedia: simces.length ? Math.round(media(simces)) : null,
+        simceMin: simces.length ? Math.min(...simces) : null,
+        simceMax: simces.length ? Math.max(...simces) : null,
+        dSimce: simces.length ? describir(simces) : null,
       },
     };
   }
@@ -597,6 +642,6 @@ const Estad = (() => {
     TABLAS_PAES, tablaParaAsignatura, puntuables, contar,
     TRAMOS, tramos, describir, nombres, validar, consolidar, ESTANDARES, CRITICA, BRECHA, POR_DEFECTO, configurar, get conf() { return conf; },
     analizar, perfil, tecnico, confiabilidad, calidadPregunta, historial, nivel, historialNivel, alertas, grupos,
-    tramoDe, nota, notaTexto, cortesDe, estandarDe, tieneTabla, puntajeDe, nivelDe, grupoEnsayo, fechaOrden, media,
+    tramoDe, nota, notaTexto, cortesDe, estandarDe, tieneTabla, puntajeDe, tieneSimce, simceDe, cortesSimce, cortesSimceSugeridos, SIMCE_MIN, SIMCE_MAX, nivelDe, grupoEnsayo, fechaOrden, media,
   };
 })();
